@@ -1,4 +1,7 @@
-export const API_BASE = "/api";
+// Points at the Express backend directly (not a relative path) so this works
+// no matter what serves the static files — Live Server, Express itself, or
+// opening index.html directly. Change this if the backend runs elsewhere.
+export const API_BASE = "http://localhost:5000/api";
 
 // Reminders/medications/financials/pharmacy backend routes don't exist yet,
 // so those screens still run on mock data. Camera scanning (OCR + NDC match

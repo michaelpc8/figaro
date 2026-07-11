@@ -200,6 +200,12 @@ function medicationCard(medication) {
               <p>${priceSummaryMarkup(medication.priceInfo, medication.name)}</p>
             </section>
           ` : ""}
+          ${medication.scanned && medication.rawText ? `
+            <section class="detail-panel">
+              <div class="detail-label">${icon("file-text")} <span>RAW SCANNED TEXT</span></div>
+              <p>${medication.rawText.slice(0, 400).replace(/\n/g, "<br>") || "(nothing readable)"}</p>
+            </section>
+          ` : ""}
           <div class="detail-grid">
             <section class="detail-panel compact">
               <div class="detail-label">${icon("pill")} <span>TABLETS REMAINING</span></div>
@@ -524,9 +530,16 @@ function captureFrame() {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
 }
 
+function fallbackName(scan) {
+  if (scan.match?.rxNormName) return scan.match.rxNormName;
+  if (scan.match?.genericName) return scan.match.genericName;
+  if (scan.ndc) return `NDC ${scan.ndc} (not found in RxNorm)`;
+  return "No NDC detected in scan";
+}
+
 function buildMedicationFromScan(scan) {
   const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
-  const name = scan.match?.rxNormName || scan.match?.genericName || "Medication from label";
+  const name = fallbackName(scan);
   const quantity = scan.quantity || scan.priceInfo?.unitCount || 30;
   const dosagePieces = [scan.strength, scan.dose, scan.frequency].filter(Boolean);
 
@@ -546,6 +559,7 @@ function buildMedicationFromScan(scan) {
     ndc: scan.ndc || "",
     ndcMatch: scan.match,
     priceInfo: scan.priceInfo,
+    rawText: scan.rawText || "",
   };
 }
 

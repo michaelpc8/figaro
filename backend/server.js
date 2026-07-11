@@ -137,8 +137,20 @@ async function getLatestNadacForNdc(ndcValue) {
 }
 
 async function getCheapestNadacByName(name, excludeNdc) {
+  const upper = name.toUpperCase();
+
+  // Prefer names that start with the search term (plain "METFORMIN...") over
+  // combination products that merely contain it ("ALOGLIPTIN-METFORMIN...").
+  const prefixRows = await queryNadac(
+    [{ property: 'ndc_description', value: `${upper}%`, operator: 'like' }],
+    [{ property: 'nadac_per_unit', order: 'asc' }],
+    10
+  );
+  const prefixMatch = prefixRows.find((row) => row.ndc !== excludeNdc);
+  if (prefixMatch) return prefixMatch;
+
   const rows = await queryNadac(
-    [{ property: 'ndc_description', value: `%${name.toUpperCase()}%`, operator: 'like' }],
+    [{ property: 'ndc_description', value: `%${upper}%`, operator: 'like' }],
     [{ property: 'nadac_per_unit', order: 'asc' }],
     10
   );
@@ -250,6 +262,56 @@ app.post('/api/price-compare', async (req, res) => {
   } catch (error) {
     console.error('Price comparison failed:', error);
     return res.status(500).json({ error: 'Price comparison failed', details: error.message });
+  }
+});
+
+async function getNadacHistory(ndcValue, limit) {
+  return queryNadac(
+    [{ property: 'ndc', value: ndcValue, operator: '=' }],
+    [{ property: 'effective_date', order: 'asc' }],
+    limit || 26
+  );
+}
+
+app.post('/api/price-history', async (req, res) => {
+  const { drugName, genericName, ndc } = req.body;
+  const searchName = genericName || drugName;
+  if (!searchName) {
+    return res.status(400).json({ error: 'drugName is required' });
+  }
+
+  try {
+    const normalizedNdc = normalizeNdc(ndc);
+    let targetNdc = normalizedNdc;
+
+    if (!targetNdc) {
+      const row = await getCheapestNadacByName(searchName, null);
+      targetNdc = row?.ndc || null;
+    }
+
+    if (!targetNdc) {
+      return res.json({ ndc: null, history: [], note: 'No CMS NADAC pricing history found for this medication.' });
+    }
+
+    const rows = await getNadacHistory(targetNdc, 80);
+    // NADAC republishes the same effective_date/price across multiple weekly
+    // snapshot pulls when the rate hasn't changed - collapse to one point per date.
+    const byDate = new Map();
+    rows.forEach((row) => byDate.set(row.effective_date, Number(row.nadac_per_unit)));
+    const history = [...byDate.entries()]
+      .sort(([a], [b]) => new Date(a) - new Date(b))
+      .map(([date, price]) => ({ date, price }));
+
+    return res.json({
+      ndc: targetNdc,
+      matchedDescription: rows[rows.length - 1]?.ndc_description || '',
+      pricingUnit: rows[rows.length - 1]?.pricing_unit || 'EA',
+      history,
+      note: 'CMS NADAC weekly average pharmacy acquisition cost history, not retail pricing.'
+    });
+  } catch (error) {
+    console.error('Price history failed:', error);
+    return res.status(500).json({ error: 'Price history failed', details: error.message });
   }
 });
 

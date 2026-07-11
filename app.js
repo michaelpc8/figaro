@@ -95,6 +95,11 @@ const state = {
     backBlob: null,
     busy: false,
     message: "Tap the shutter to enable your camera.",
+    pendingReminderPrompt: null,
+  },
+  financials: {
+    expandedId: null,
+    cache: {},
   },
 };
 
@@ -290,6 +295,7 @@ function cameraScreen() {
   return `
     <section class="screen camera-screen">
       <div class="camera-top">
+        <div class="brand-lockup">${icon("pill")} <span>Papa Pill</span></div>
         <h1>Scan Prescription</h1>
         <p>Patient Information Leaflet</p>
         <div class="scan-steps">
@@ -328,7 +334,114 @@ function cameraScreen() {
         <span class="capture-spacer"></span>
         <input id="uploadInput" type="file" accept="image/*" hidden />
       </div>
+
+      ${state.camera.pendingReminderPrompt ? `
+        <div class="modal-backdrop">
+          <div class="modal-card">
+            <h2>Add to Reminders?</h2>
+            <p><strong>${state.camera.pendingReminderPrompt.name}</strong> was added to My Meds. Want reminders set up for it too?</p>
+            <div class="modal-actions">
+              <button id="reminderPromptNo" class="modal-btn secondary" type="button">Not now</button>
+              <button id="reminderPromptYes" class="modal-btn primary" type="button">Yes, add it</button>
+            </div>
+          </div>
+        </div>
+      ` : ""}
     </section>
+  `;
+}
+
+function formatShortDate(dateStr) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(dateStr));
+}
+
+function formatUnitPrice(value) {
+  if (value == null) return "—";
+  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
+}
+
+function priceLineChart(history) {
+  const width = 280;
+  const height = 108;
+  const padLeft = 6;
+  const padRight = 6;
+  const padTop = 16;
+  const padBottom = 20;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
+  const prices = history.map((point) => point.price);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const range = maxPrice - minPrice || Math.max(maxPrice * 0.1, 0.0001);
+
+  const points = history.map((point, index) => ({
+    x: padLeft + (history.length === 1 ? plotWidth / 2 : (index / (history.length - 1)) * plotWidth),
+    y: padTop + plotHeight - ((point.price - minPrice) / range) * plotHeight,
+    price: point.price,
+  }));
+
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const baseline = (padTop + plotHeight).toFixed(1);
+  const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
+
+  const last = points[points.length - 1];
+  // The last point sits at the plot's right edge by construction, so the
+  // end-label must right-anchor there — a middle anchor would run off the
+  // chart's edge instead of staying inside it.
+  const labelY = last.y < padTop + 12 ? last.y + 16 : Math.max(last.y - 10, 11);
+
+  return `
+    <div class="fin-chart-wrap">
+      <svg class="fin-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Average acquisition price from ${formatShortDate(history[0].date)} to ${formatShortDate(history[history.length - 1].date)}">
+        <line class="fin-gridline" x1="${padLeft}" y1="${baseline}" x2="${width - padRight}" y2="${baseline}" />
+        <path class="fin-area" d="${areaPath}" />
+        <path class="fin-line" d="${linePath}" />
+        <circle class="fin-end-ring" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="6" />
+        <circle class="fin-end-dot" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="4" />
+        <text class="fin-end-label" x="${(width - padRight).toFixed(1)}" y="${labelY}" text-anchor="end">${formatUnitPrice(last.price)}</text>
+        <text class="fin-axis-label" x="${padLeft}" y="${height - 4}">${formatShortDate(history[0].date)}</text>
+        <text class="fin-axis-label" x="${width - padRight}" y="${height - 4}" text-anchor="end">${formatShortDate(history[history.length - 1].date)}</text>
+      </svg>
+    </div>
+  `;
+}
+
+function financialsDetail(cacheEntry) {
+  if (!cacheEntry || cacheEntry.loading) {
+    return `<div class="fin-details"><p class="fin-note">Loading pricing data…</p></div>`;
+  }
+  if (cacheEntry.error) {
+    return `<div class="fin-details"><p class="fin-note">${cacheEntry.error}</p></div>`;
+  }
+
+  const { averagePrice, history, pricingUnit } = cacheEntry;
+  return `
+    <div class="fin-details">
+      <div class="fin-average">
+        <span>Average price per ${pricingUnit === "ML" ? "mL" : "unit"}</span>
+        <strong>${formatUnitPrice(averagePrice)}</strong>
+      </div>
+      ${history.length > 1 ? priceLineChart(history) : `<p class="fin-note">Not enough price history to chart yet.</p>`}
+      <p class="fin-note">Based on CMS NADAC pharmacy acquisition cost — not the final retail price.</p>
+    </div>
+  `;
+}
+
+function financialsRow(medication) {
+  const expanded = state.financials.expandedId === medication.id;
+  return `
+    <article class="fin-card ${expanded ? "expanded" : ""}" data-fin-id="${medication.id}">
+      <button class="fin-summary" type="button" aria-expanded="${expanded}">
+        <span class="pill-icon" style="--accent:${medication.accent}; --icon-bg:${medication.iconBg}">${icon("pill")}</span>
+        <span class="med-main">
+          <span class="med-title">${medication.name}</span>
+          <span class="med-subtitle">${medication.subtitle}</span>
+        </span>
+        ${icon(expanded ? "chevron-up" : "chevron-down", "chevron")}
+      </button>
+      ${expanded ? financialsDetail(state.financials.cache[medication.id]) : ""}
+    </article>
   `;
 }
 
@@ -338,16 +451,11 @@ function financialsScreen() {
       <div class="screen-scroll">
         <header class="page-header">
           <h1>Financials</h1>
-          <p>Medication costs and savings</p>
+          <p>Tap a medication to see average pricing</p>
         </header>
-        <section class="feature-card hero-feature">
-          <span class="feature-icon">${icon("wallet-cards")}</span>
-          <div><small>Estimated monthly cost</small><strong>$42.80</strong></div>
-        </section>
-        <section class="feature-card">
-          <h2>Backend connection</h2>
-          <p>Connect <code>GET /api/financials/summary</code> to display insurance, coupon, and out-of-pocket comparisons here.</p>
-        </section>
+        <div class="fin-list">
+          ${state.medications.map(financialsRow).join("")}
+        </div>
       </div>
     </section>
   `;
@@ -372,6 +480,8 @@ const renderers = {
   financials: financialsScreen,
   pharmacy: pharmacyScreen,
 };
+
+const SCREEN_ORDER = ["medications", "reminders", "camera", "financials", "pharmacy"];
 
 function setActiveNavigation() {
   document.querySelectorAll(".nav-item").forEach((item) => {
@@ -433,6 +543,64 @@ function bindScreenEvents() {
     event.target.value = "";
     if (file) await handleCapturedBlob(file);
   });
+
+  document.querySelector("#reminderPromptYes")?.addEventListener("click", () => respondToReminderPrompt(true));
+  document.querySelector("#reminderPromptNo")?.addEventListener("click", () => respondToReminderPrompt(false));
+
+  document.querySelectorAll(".fin-summary").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.closest(".fin-card").dataset.finId;
+      toggleFinancialsRow(id);
+    });
+  });
+}
+
+async function toggleFinancialsRow(id) {
+  if (state.financials.expandedId === id) {
+    state.financials.expandedId = null;
+    render();
+    return;
+  }
+
+  state.financials.expandedId = id;
+  render();
+
+  if (state.financials.cache[id]) return;
+
+  const medication = state.medications.find((item) => item.id === id);
+  if (!medication) return;
+
+  state.financials.cache[id] = { loading: true, error: null, averagePrice: null, history: [] };
+  render();
+
+  try {
+    const [priceResult, historyResult] = await Promise.all([
+      api.comparePrice({
+        drugName: medication.name,
+        ndc: medication.ndc || "",
+        quantity: "1 tablet",
+        paidCost: "",
+      }),
+      api.getPriceHistory({
+        drugName: medication.name,
+        ndc: medication.ndc || "",
+      }),
+    ]);
+
+    const history = historyResult.history || [];
+    state.financials.cache[id] = {
+      loading: false,
+      error: priceResult.estimatedPrice == null && !history.length
+        ? "No CMS pricing data found for this medication."
+        : null,
+      averagePrice: priceResult.estimatedPrice,
+      history,
+      pricingUnit: priceResult.pricingUnit || historyResult.pricingUnit || "EA",
+    };
+  } catch (error) {
+    state.financials.cache[id] = { loading: false, error: error.message, averagePrice: null, history: [] };
+  }
+  render();
 }
 
 async function startCamera() {
@@ -467,8 +635,6 @@ async function startCamera() {
   }
 }
 
-// Matches the .corner-* guide overlay insets (see styles.css) so the capture
-// is cropped to the label the user aligns in frame, not the whole scene.
 function captureFrame() {
   const video = document.querySelector("#cameraVideo");
   const canvas = document.querySelector("#captureCanvas");
@@ -521,7 +687,34 @@ function buildMedicationFromScan(scan) {
     ndcMatch: scan.match,
     priceInfo: scan.priceInfo,
     rawText: scan.rawText || "",
+    frequency: scan.frequency || "",
   };
+}
+
+const FREQUENCY_SCHEDULES = {
+  "Once daily": [{ time: "8:00 AM", period: "morning" }],
+  "Twice daily": [
+    { time: "8:00 AM", period: "morning" },
+    { time: "6:30 PM", period: "evening" },
+  ],
+  "Three times daily": [
+    { time: "8:00 AM", period: "morning" },
+    { time: "1:00 PM", period: "evening" },
+    { time: "10:00 PM", period: "night" },
+  ],
+};
+
+function buildRemindersForMedication(medication) {
+  const schedule = FREQUENCY_SCHEDULES[medication.frequency] || [{ time: "8:00 AM", period: "morning" }];
+  const detail = [medication.subtitle].filter(Boolean).join(" ") || "As directed";
+  return schedule.map((slot, index) => ({
+    id: `${medication.id}-r${index}`,
+    medication: medication.name,
+    detail,
+    time: slot.time,
+    period: slot.period,
+    taken: false,
+  }));
 }
 
 async function handleCameraButton() {
@@ -564,15 +757,13 @@ async function handleCapturedBlob(blob) {
     const medication = buildMedicationFromScan(scan);
     state.medications.unshift(medication);
     persistScannedMedications();
-    state.expandedMedicationId = medication.id;
-    state.screen = "medications";
-    stopCamera();
-    resetCameraScan();
-    showToast(
-      medication.priceInfo?.cheaperAlternative
-        ? `${medication.name} scanned — cheaper option available!`
-        : `${medication.name} scanned successfully.`
-    );
+    state.camera.busy = false;
+    state.camera.step = 1;
+    state.camera.frontBlob = null;
+    state.camera.backBlob = null;
+    state.camera.message = "Tap the shutter to enable your camera.";
+    state.camera.pendingReminderPrompt = medication;
+    render();
   } catch (error) {
     state.camera.busy = false;
     state.camera.message = "";
@@ -581,13 +772,19 @@ async function handleCapturedBlob(blob) {
   }
 }
 
-function resetCameraScan() {
-  state.camera.step = 1;
-  state.camera.frontBlob = null;
-  state.camera.backBlob = null;
-  state.camera.busy = false;
-  state.camera.message = "Tap the shutter to enable your camera.";
-  render();
+function respondToReminderPrompt(addReminders) {
+  const medication = state.camera.pendingReminderPrompt;
+  if (!medication) return;
+  state.camera.pendingReminderPrompt = null;
+
+  if (addReminders) {
+    state.reminders.unshift(...buildRemindersForMedication(medication));
+  }
+
+  state.expandedMedicationId = medication.id;
+  stopCamera();
+  navigateToScreen("medications");
+  showToast(`${medication.name} added to My Meds${addReminders ? " and Reminders" : ""}.`);
 }
 
 function stopCamera() {
@@ -595,12 +792,39 @@ function stopCamera() {
   state.camera.stream = null;
 }
 
+// Slides the outgoing screen out and the new one in, direction following the
+// nav bar's left-to-right order, so switching tabs reads like a phone swipe
+// instead of an instant content swap.
+function navigateToScreen(nextScreen) {
+  if (nextScreen === state.screen) return;
+  if (nextScreen !== "camera" && state.screen === "camera") stopCamera();
+
+  const reverse = SCREEN_ORDER.indexOf(nextScreen) < SCREEN_ORDER.indexOf(state.screen);
+  const outgoingEl = screenHost.firstElementChild;
+  const outgoingClone = outgoingEl ? outgoingEl.cloneNode(true) : null;
+
+  state.screen = nextScreen;
+  render();
+
+  const incomingEl = screenHost.firstElementChild;
+  if (incomingEl) {
+    incomingEl.classList.add("screen-slide-enter", reverse ? "reverse" : "forward");
+    incomingEl.addEventListener(
+      "animationend",
+      () => incomingEl.classList.remove("screen-slide-enter", "reverse", "forward"),
+      { once: true }
+    );
+  }
+
+  if (outgoingClone) {
+    outgoingClone.classList.add("screen-slide-exit", reverse ? "reverse" : "forward");
+    screenHost.appendChild(outgoingClone);
+    outgoingClone.addEventListener("animationend", () => outgoingClone.remove(), { once: true });
+  }
+}
+
 document.querySelectorAll(".nav-item").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (button.dataset.screen !== "camera" && state.screen === "camera") stopCamera();
-    state.screen = button.dataset.screen;
-    render();
-  });
+  button.addEventListener("click", () => navigateToScreen(button.dataset.screen));
 });
 
 window.addEventListener("beforeunload", stopCamera);

@@ -3,9 +3,9 @@
 // opening index.html directly. Change this if the backend runs elsewhere.
 export const API_BASE = "http://localhost:5000/api";
 
-// Reminders/medications/financials/pharmacy backend routes don't exist yet,
-// so those screens still run on mock data. Camera scanning (OCR + NDC match
-// + price comparison) is real and always hits the live backend below.
+// Reminders/medications backend routes don't exist yet, so those screens
+// still run on mock data. Camera scanning and Financials (NADAC-backed price
+// + history) are real and always hit the live backend below.
 export const DEV_USE_MOCKS = true;
 
 async function request(path, options = {}) {
@@ -155,6 +155,13 @@ export const api = {
     });
   },
 
+  getPriceHistory(payload) {
+    return request("/price-history", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   // Runs OCR on both label photos in-browser (Tesseract.js), pulls out the
   // NDC/strength/dose/etc, matches the NDC against RxNorm, and price-checks
   // the match against CMS NADAC data. One call, real data at every step.
@@ -207,7 +214,4 @@ export const api = {
     };
   },
 
-  getFinancialSummary() {
-    return request("/financials/summary");
-  },
 };

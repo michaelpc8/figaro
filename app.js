@@ -26,6 +26,8 @@ const state = {
   screen: "medications",
   expandedMedicationId: "lisinopril",
   deleteConfirmation: null,
+  reminderDeleteMode: false,
+  reminderFormOpen: false,
   medications: [
     ...loadScannedMedications(),
     {
@@ -240,7 +242,7 @@ function medicationsScreen() {
 function remindersScreen() {
   const total = state.reminders.length;
   const taken = state.reminders.filter((item) => item.taken).length;
-  const percentage = Math.round((taken / total) * 100);
+  const percentage = total ? Math.round((taken / total) * 100) : 0;
   const periodMeta = {
     morning: { label: "MORNING", color: "#f3a642" },
     evening: { label: "EVENING", color: "#9869e9" },
@@ -251,8 +253,15 @@ function remindersScreen() {
     <section class="screen reminders-screen">
       <div class="screen-scroll">
         <header class="page-header reminders-header">
-          <h1>Reminders</h1>
+          <div class="reminders-title-row">
+            <h1>Reminders</h1>
+            <div class="reminder-actions" aria-label="Reminder actions">
+              <button id="addReminderButton" type="button" aria-label="Add reminder">${icon("plus")}</button>
+              <button id="removeReminderButton" class="${state.reminderDeleteMode ? "active" : ""}" type="button" aria-label="Remove reminder">${icon("minus")}</button>
+            </div>
+          </div>
           <p>Today – ${formatToday()}</p>
+          ${state.reminderDeleteMode ? `<p class="remove-reminder-hint">Select a dose reminder to remove</p>` : ""}
         </header>
 
         <section class="daily-progress-card">
@@ -272,7 +281,7 @@ function remindersScreen() {
                 <h2><span style="background:${meta.color}"></span>${meta.label}</h2>
                 <div class="reminder-list">
                   ${items.map((item) => `
-                    <button class="reminder-card ${item.taken ? "taken" : ""}" type="button" data-reminder-id="${item.id}">
+                    <button class="reminder-card ${item.taken ? "taken" : ""} ${state.reminderDeleteMode ? "remove-mode" : ""}" type="button" data-reminder-id="${item.id}">
                       <span class="dose-check">${item.taken ? icon("check") : ""}</span>
                       <span class="dose-copy">
                         <strong>${item.medication}</strong>
@@ -520,6 +529,12 @@ function bindScreenEvents() {
       const reminder = state.reminders.find((item) => item.id === button.dataset.reminderId);
       if (!reminder) return;
 
+      if (state.reminderDeleteMode) {
+        state.deleteConfirmation = { type: "reminder", id: reminder.id, name: reminder.medication };
+        render();
+        return;
+      }
+
       reminder.taken = !reminder.taken;
       render();
 
@@ -533,6 +548,17 @@ function bindScreenEvents() {
         }
       }
     });
+  });
+
+  document.querySelector("#addReminderButton")?.addEventListener("click", () => {
+    state.reminderDeleteMode = false;
+    state.reminderFormOpen = true;
+    render();
+  });
+
+  document.querySelector("#removeReminderButton")?.addEventListener("click", () => {
+    state.reminderDeleteMode = !state.reminderDeleteMode;
+    render();
   });
 
   document.querySelectorAll(".delete-med-btn").forEach((button) => {
@@ -621,17 +647,52 @@ function renderConfirmDialog() {
   const dialog = document.querySelector("#confirmDialog");
   if (!dialog) return;
 
-  if (!state.deleteConfirmation) {
+  if (!state.deleteConfirmation && !state.reminderFormOpen) {
     dialog.innerHTML = "";
     dialog.classList.add("hidden");
     dialog.setAttribute("aria-hidden", "true");
     return;
   }
 
+  if (state.reminderFormOpen) {
+    const hasMedications = state.medications.length > 0;
+    dialog.innerHTML = `
+      <form id="reminderForm" class="confirm-panel reminder-form" role="dialog" aria-labelledby="reminderFormTitle">
+        <h2 id="reminderFormTitle">Add dose reminder</h2>
+        ${hasMedications ? "" : `<p class="reminder-form-empty">Add a medication to My Meds before creating a reminder.</p>`}
+        <label>Medication
+          <select id="reminderMedication" required ${hasMedications ? "" : "disabled"}>
+            ${hasMedications
+              ? state.medications.map((medication) => `<option value="${medication.id}">${medication.name}</option>`).join("")
+              : `<option>No medications available</option>`}
+          </select>
+        </label>
+        <label>Time <input id="reminderTime" type="time" value="08:00" required></label>
+        <label>Time of day
+          <select id="reminderPeriod">
+            <option value="morning">Morning</option>
+            <option value="evening">Evening</option>
+            <option value="night">Night</option>
+          </select>
+        </label>
+        <div class="confirm-actions">
+          <button class="confirm-yes" type="submit" ${hasMedications ? "" : "disabled"}>Add</button>
+          <button id="cancelReminder" class="confirm-no" type="button">Cancel</button>
+        </div>
+      </form>
+    `;
+    dialog.classList.remove("hidden");
+    dialog.setAttribute("aria-hidden", "false");
+    bindReminderFormEvents();
+    return;
+  }
+
+  const deletingReminder = state.deleteConfirmation.type === "reminder";
+
   dialog.innerHTML = `
     <div class="confirm-panel" role="alertdialog" aria-labelledby="confirmTitle" aria-describedby="confirmText">
-      <h2 id="confirmTitle">Delete medication?</h2>
-      <p id="confirmText">Are you sure you want to delete ${state.deleteConfirmation.name}?</p>
+      <h2 id="confirmTitle">Delete ${deletingReminder ? "dose reminder" : "medication"}?</h2>
+      <p id="confirmText">Are you sure you want to delete ${state.deleteConfirmation.name}${deletingReminder ? " dose reminder" : ""}?</p>
       <div class="confirm-actions">
         <button id="confirmYes" class="confirm-yes" type="button">Yes</button>
         <button id="confirmNo" class="confirm-no" type="button">No</button>
@@ -647,17 +708,51 @@ function bindConfirmEvents() {
   document.querySelector("#confirmYes")?.addEventListener("click", () => {
     const id = state.deleteConfirmation?.id;
     if (!id) return;
-    state.medications = state.medications.filter((medication) => medication.id !== id);
-    if (state.expandedMedicationId === id) {
-      state.expandedMedicationId = null;
+    if (state.deleteConfirmation.type === "reminder") {
+      state.reminders = state.reminders.filter((reminder) => reminder.id !== id);
+      state.reminderDeleteMode = false;
+    } else {
+      state.medications = state.medications.filter((medication) => medication.id !== id);
+      if (state.expandedMedicationId === id) state.expandedMedicationId = null;
+      persistScannedMedications();
     }
     state.deleteConfirmation = null;
     render();
   });
 
   document.querySelector("#confirmNo")?.addEventListener("click", () => {
+    if (state.deleteConfirmation?.type === "reminder") {
+      state.reminderDeleteMode = false;
+    }
     state.deleteConfirmation = null;
     render();
+  });
+}
+
+function bindReminderFormEvents() {
+  document.querySelector("#cancelReminder")?.addEventListener("click", () => {
+    state.reminderFormOpen = false;
+    render();
+  });
+
+  document.querySelector("#reminderForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const medication = state.medications.find((item) => item.id === document.querySelector("#reminderMedication").value);
+    const timeValue = document.querySelector("#reminderTime").value;
+    if (!medication || !timeValue) return;
+    const [hours, minutes] = timeValue.split(":").map(Number);
+    const displayTime = `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${hours >= 12 ? "PM" : "AM"}`;
+    state.reminders.push({
+      id: `reminder-${Date.now()}`,
+      medication: medication.name,
+      detail: medication.dosage || medication.subtitle || "As directed",
+      time: displayTime,
+      period: document.querySelector("#reminderPeriod").value,
+      taken: false,
+    });
+    state.reminderFormOpen = false;
+    render();
+    showToast(`${medication.name} reminder added.`);
   });
 }
 

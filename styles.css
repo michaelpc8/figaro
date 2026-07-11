@@ -90,6 +90,8 @@ body {
 .page-header { padding: 5px 5px 11px; }
 .page-header h1 { margin: 0; font-size: 21px; line-height: 1.2; letter-spacing: -0.45px; }
 .page-header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.medications-screen .page-header { padding: 15px 5px 10px; }
+.medications-screen .page-header h1 { font-weight: 800; }
 
 .med-list { display: grid; gap: 11px; }
 .med-card {
@@ -185,7 +187,15 @@ body {
   background: #b1271b;
 }
 
-.reminders-header { padding-bottom: 10px; }
+.reminders-header { padding: 15px 5px 10px; }
+.reminders-header h1 { font-weight: 800; }
+.reminders-screen .screen-scroll { padding-bottom: 82px; }
+.reminders-title-row { display: flex; align-items: center; }
+.reminder-actions { position: absolute; z-index: 10; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 12px; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.94); box-shadow: 0 8px 24px rgba(42,63,83,.16); }
+.reminder-actions button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #d8e1eb; border-radius: 50%; background: #fff; color: var(--blue); cursor: pointer; box-shadow: 0 4px 10px rgba(42,63,83,.06); }
+.reminder-actions button:hover, .reminder-actions button.active { border-color: #d93025; background: #fff0ef; color: #d93025; }
+.reminder-actions svg { width: 18px; height: 18px; }
+.remove-reminder-hint { color: #d93025 !important; font-weight: 650; }
 .daily-progress-card {
   position: relative;
   margin-bottom: 11px;
@@ -239,6 +249,15 @@ body {
 .dose-time svg { width: 14px; height: 14px; }
 .reminder-card.taken .dose-copy { text-decoration: line-through; color: #7e8997; }
 .reminder-card.taken .dose-copy span { color: #a4afbc; }
+.reminder-card.remove-mode { outline: 1px dashed #d93025; }
+.reminder-card.remove-mode .dose-check { border-color: #d93025; }
+
+.reminder-form { text-align: left; }
+.reminder-form h2 { text-align: center; }
+.reminder-form-empty { margin-top: 12px !important; text-align: center; color: #d93025 !important; }
+.reminder-form label { display: grid; gap: 6px; margin-top: 12px; color: #5c6a7f; font-size: 12px; font-weight: 650; }
+.reminder-form input, .reminder-form select { width: 100%; border: 1px solid #d8e1eb; border-radius: 12px; padding: 10px 11px; background: #fff; color: var(--ink); }
+.reminder-form button:disabled, .reminder-form select:disabled { cursor: not-allowed; opacity: .55; }
 
 .camera-mode .screen-host { background: #0e0e0e; }
 .camera-screen { display: grid; grid-template-rows: 116px 1fr 108px; background: #0f0f0f; color: #fff; }

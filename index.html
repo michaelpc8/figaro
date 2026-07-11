@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>Figaro - Medication Scan</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-card">
+        <p class="eyebrow">Hackathon MVP</p>
+        <h1>Scan both sides of a medication label</h1>
+        <p class="subtitle">
+          Capture the front and back of the label, extract the dosing frequency
+          and NDC, and save both sides of the data for later tracking.
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>1. Capture front of label</h2>
+          <button id="sampleBtn" class="secondary-btn">Use sample labels</button>
+        </div>
+
+        <label class="upload-zone" for="frontImageInput">
+          <input id="frontImageInput" type="file" accept="image/*" />
+          <span class="upload-text">Tap to upload or take a photo of the front</span>
+        </label>
+
+        <img id="frontPreview" alt="Front label preview" class="preview-image" />
+        <label class="field-label" for="frontText">Front OCR text</label>
+        <textarea id="frontText" rows="4" placeholder="Front label text will appear here"></textarea>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>2. Capture back of label</h2>
+          <span class="pill">Both sides stored</span>
+        </div>
+
+        <label class="upload-zone" for="backImageInput">
+          <input id="backImageInput" type="file" accept="image/*" />
+          <span class="upload-text">Tap to upload or take a photo of the back</span>
+        </label>
+
+        <img id="backPreview" alt="Back label preview" class="preview-image" />
+        <label class="field-label" for="backText">Back OCR text</label>
+        <textarea id="backText" rows="4" placeholder="Back label text will appear here"></textarea>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>3. Review parsed info</h2>
+          <span class="pill">Combined flow</span>
+        </div>
+
+        <div class="grid two-up">
+          <div>
+            <label class="field-label" for="medName">Medication name</label>
+            <input id="medName" type="text" placeholder="e.g. Amoxicillin" />
+          </div>
+          <div>
+            <label class="field-label" for="strength">Strength</label>
+            <input id="strength" type="text" placeholder="e.g. 500mg" />
+          </div>
+        </div>
+
+        <div class="grid two-up">
+          <div>
+            <label class="field-label" for="dose">Dose</label>
+            <input id="dose" type="text" placeholder="e.g. 1 tablet" />
+          </div>
+          <div>
+            <label class="field-label" for="frequency">Frequency</label>
+            <input id="frequency" type="text" placeholder="e.g. Twice daily" />
+          </div>
+        </div>
+
+        <div class="grid two-up">
+          <div>
+            <label class="field-label" for="ndc">NDC</label>
+            <input id="ndc" type="text" placeholder="e.g. 12345-6789-01" />
+          </div>
+          <div>
+            <label class="field-label" for="cost">Cost</label>
+            <input id="cost" type="text" placeholder="e.g. $14.50" />
+          </div>
+        </div>
+
+        <div class="field-block">
+          <label class="field-label" for="instructions">Instructions</label>
+          <input id="instructions" type="text" placeholder="e.g. Take by mouth" />
+        </div>
+
+        <div class="field-block checkbox-block">
+          <input id="insuranceUsed" type="checkbox" />
+          <label for="insuranceUsed">Run through insurance</label>
+        </div>
+
+        <button id="saveBtn" class="primary-btn">Save medication</button>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>4. Saved medications</h2>
+          <span id="countBadge" class="pill">0 saved</span>
+        </div>
+        <div id="recordList" class="record-list"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

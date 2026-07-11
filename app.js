@@ -529,17 +529,27 @@ function fallbackName(scan) {
   return "No NDC detected in scan";
 }
 
+// RxNorm's matched name is authoritative government data; raw OCR digits are
+// not. Prefer whatever strength RxNorm reports once we have a match, since a
+// misread OCR digit (e.g. 15mg read as 16mg) shouldn't override a real match.
+function resolvedStrength(scan) {
+  const rxNormName = scan.match?.rxNormName || scan.match?.genericName || "";
+  const fromRxNorm = rxNormName.match(/\d+(\.\d+)?\s*(MG|MCG|G|ML|%)\b/i);
+  return fromRxNorm ? fromRxNorm[0] : scan.strength;
+}
+
 function buildMedicationFromScan(scan) {
   const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
   const name = fallbackName(scan);
+  const strength = resolvedStrength(scan);
   const quantity = scan.quantity || scan.priceInfo?.unitCount || 30;
-  const dosagePieces = [scan.strength, scan.dose, scan.frequency].filter(Boolean);
+  const dosagePieces = [strength, scan.dose, scan.frequency].filter(Boolean);
 
   return {
     id: crypto.randomUUID(),
     scanned: true,
     name,
-    subtitle: [scan.strength, scan.dose].filter(Boolean).join(" ") || "Scanned from label",
+    subtitle: [strength, scan.dose].filter(Boolean).join(" ") || "Scanned from label",
     accent: palette.accent,
     iconBg: palette.iconBg,
     current: quantity,

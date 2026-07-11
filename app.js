@@ -25,6 +25,7 @@ function persistScannedMedications() {
 const state = {
   screen: "medications",
   expandedMedicationId: "lisinopril",
+  deleteConfirmation: null,
   medications: [
     ...loadScannedMedications(),
     {
@@ -213,6 +214,7 @@ function medicationCard(medication) {
               <p>${medication.lastPickup}</p>
             </section>
           </div>
+          <button class="delete-med-btn" type="button" data-delete-med-id="${medication.id}">DELETE</button>
         </div>
       ` : ""}
     </article>
@@ -494,6 +496,7 @@ function render() {
   screenHost.innerHTML = renderers[state.screen]();
   setActiveNavigation();
   bindScreenEvents();
+  renderConfirmDialog();
   refreshIcons();
 
   if (state.screen === "camera" && state.camera.stream) {
@@ -529,6 +532,17 @@ function bindScreenEvents() {
           showToast(error.message);
         }
       }
+    });
+  });
+
+  document.querySelectorAll(".delete-med-btn").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = button.dataset.deleteMedId;
+      const medication = state.medications.find((item) => item.id === id);
+      if (!medication) return;
+      state.deleteConfirmation = { id: medication.id, name: medication.name };
+      render();
     });
   });
 
@@ -601,6 +615,50 @@ async function toggleFinancialsRow(id) {
     state.financials.cache[id] = { loading: false, error: error.message, averagePrice: null, history: [] };
   }
   render();
+}
+
+function renderConfirmDialog() {
+  const dialog = document.querySelector("#confirmDialog");
+  if (!dialog) return;
+
+  if (!state.deleteConfirmation) {
+    dialog.innerHTML = "";
+    dialog.classList.add("hidden");
+    dialog.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  dialog.innerHTML = `
+    <div class="confirm-panel" role="alertdialog" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+      <h2 id="confirmTitle">Delete medication?</h2>
+      <p id="confirmText">Are you sure you want to delete ${state.deleteConfirmation.name}?</p>
+      <div class="confirm-actions">
+        <button id="confirmYes" class="confirm-yes" type="button">Yes</button>
+        <button id="confirmNo" class="confirm-no" type="button">No</button>
+      </div>
+    </div>
+  `;
+  dialog.classList.remove("hidden");
+  dialog.setAttribute("aria-hidden", "false");
+  bindConfirmEvents();
+}
+
+function bindConfirmEvents() {
+  document.querySelector("#confirmYes")?.addEventListener("click", () => {
+    const id = state.deleteConfirmation?.id;
+    if (!id) return;
+    state.medications = state.medications.filter((medication) => medication.id !== id);
+    if (state.expandedMedicationId === id) {
+      state.expandedMedicationId = null;
+    }
+    state.deleteConfirmation = null;
+    render();
+  });
+
+  document.querySelector("#confirmNo")?.addEventListener("click", () => {
+    state.deleteConfirmation = null;
+    render();
+  });
 }
 
 async function startCamera() {

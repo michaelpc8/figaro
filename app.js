@@ -1,416 +1,582 @@
-const STORAGE_KEY = "figaro-medications";
+import { api, DEV_USE_MOCKS } from "./api.js";
 
-const sampleFrontText = `Front label: Amoxicillin 500mg.
-Take 1 tablet twice daily by mouth.
-NDC: 12345-6789-01
-Cost: $14.99`;
+const SCANNED_STORAGE_KEY = "figaro-scanned-medications";
 
-const sampleBackText = `Back label: Take by mouth with food.
-This claim was submitted to insurance.
-Patient instructions: take as directed.`;
+const ACCENT_PALETTE = [
+  { accent: "#138fb7", iconBg: "#e6f5fa" },
+  { accent: "#09bda8", iconBg: "#e6faf7" },
+  { accent: "#9668eb", iconBg: "#f3edff" },
+  { accent: "#f0a23a", iconBg: "#fff4e3" },
+];
 
-const frontImageInput = document.getElementById("frontImageInput");
-const backImageInput = document.getElementById("backImageInput");
-const frontPreview = document.getElementById("frontPreview");
-const backPreview = document.getElementById("backPreview");
-const frontText = document.getElementById("frontText");
-const backText = document.getElementById("backText");
-const medName = document.getElementById("medName");
-const strength = document.getElementById("strength");
-const dose = document.getElementById("dose");
-const frequency = document.getElementById("frequency");
-const ndc = document.getElementById("ndc");
-const cost = document.getElementById("cost");
-const quantity = document.getElementById("quantity");
-const instructions = document.getElementById("instructions");
-const insuranceUsed = document.getElementById("insuranceUsed");
-const notes = document.getElementById("notes");
-const ndcLookupBtn = document.getElementById("ndcLookupBtn");
-const priceCompareBtn = document.getElementById("priceCompareBtn");
-const lookupStatus = document.getElementById("lookupStatus");
-const priceSummary = document.getElementById("priceSummary");
-const saveBtn = document.getElementById("saveBtn");
-const sampleBtn = document.getElementById("sampleBtn");
-const recordList = document.getElementById("recordList");
-const countBadge = document.getElementById("countBadge");
+function loadScannedMedications() {
+  try {
+    return JSON.parse(localStorage.getItem(SCANNED_STORAGE_KEY) || "[]");
+  } catch (error) {
+    return [];
+  }
+}
 
-let currentLookup = null;
-let currentPriceCompare = null;
+function persistScannedMedications() {
+  const scanned = state.medications.filter((medication) => medication.scanned);
+  localStorage.setItem(SCANNED_STORAGE_KEY, JSON.stringify(scanned));
+}
 
-function parseFrequency(text) {
-  const normalized = text.toLowerCase();
+const state = {
+  screen: "medications",
+  expandedMedicationId: "lisinopril",
+  medications: [
+    ...loadScannedMedications(),
+    {
+      id: "lisinopril",
+      name: "Lisinopril",
+      subtitle: "Lisinopril 10mg",
+      accent: "#138fb7",
+      iconBg: "#e6f5fa",
+      current: 62,
+      total: 90,
+      treats: "High blood pressure (hypertension), heart failure",
+      instructions:
+        "Take once daily in the morning with or without food. Do not skip doses even if you feel well. Avoid potassium supplements unless directed. Monitor blood pressure regularly.",
+      dosage: "10mg – 1 tablet once daily",
+      lastPickup: "June 14, 2026",
+    },
+    {
+      id: "metformin",
+      name: "Metformin",
+      subtitle: "Metformin HCl 500mg",
+      accent: "#09bda8",
+      iconBg: "#e6faf7",
+      current: 118,
+      total: 180,
+      treats: "Type 2 diabetes",
+      instructions: "Take with meals as prescribed. Contact your care team if you experience severe stomach symptoms.",
+      dosage: "500mg – 1 tablet twice daily",
+      lastPickup: "June 3, 2026",
+    },
+    {
+      id: "atorvastatin",
+      name: "Atorvastatin",
+      subtitle: "Atorvastatin Calcium 20mg",
+      accent: "#9668eb",
+      iconBg: "#f3edff",
+      current: 9,
+      total: 30,
+      treats: "High cholesterol and cardiovascular risk reduction",
+      instructions: "Take once daily at the same time. Follow your clinician's instructions about food and other medicines.",
+      dosage: "20mg – 1 tablet nightly",
+      lastPickup: "June 28, 2026",
+    },
+    {
+      id: "omeprazole",
+      name: "Omeprazole",
+      subtitle: "Omeprazole 20mg",
+      accent: "#f0a23a",
+      iconBg: "#fff4e3",
+      current: 24,
+      total: 30,
+      treats: "Acid reflux and heartburn",
+      instructions: "Take before a meal as directed. Swallow the capsule whole unless your pharmacist says otherwise.",
+      dosage: "20mg – 1 capsule daily",
+      lastPickup: "July 5, 2026",
+    },
+  ],
+  reminders: [
+    { id: "r1", medication: "Lisinopril", detail: "10mg – 1 tablet", time: "8:00 AM", period: "morning", taken: true },
+    { id: "r2", medication: "Metformin", detail: "500mg – 1 tablet", time: "8:30 AM", period: "morning", taken: true },
+    { id: "r3", medication: "Omeprazole", detail: "20mg – 1 capsule", time: "7:30 AM", period: "morning", taken: false },
+    { id: "r4", medication: "Metformin", detail: "500mg – 1 tablet", time: "6:30 PM", period: "evening", taken: false },
+    { id: "r5", medication: "Atorvastatin", detail: "20mg – 1 tablet", time: "10:00 PM", period: "night", taken: false },
+  ],
+  camera: {
+    stream: null,
+    step: 1,
+    frontBlob: null,
+    backBlob: null,
+    busy: false,
+    message: "Tap the shutter to enable your camera.",
+  },
+};
 
-  if (/(twice|2 times|bid).*(day|daily)/.test(normalized) || /every 12 hours/.test(normalized)) {
-    return { label: "Twice daily", value: 2, intervalHours: 12 };
+const screenHost = document.querySelector("#screenHost");
+const toast = document.querySelector("#toast");
+
+function icon(name, className = "") {
+  return `<i data-lucide="${name}" class="${className}"></i>`;
+}
+
+function refreshIcons() {
+  window.lucide?.createIcons({ attrs: { "stroke-width": 1.9 } });
+}
+
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.add("show");
+  window.clearTimeout(showToast.timeoutId);
+  showToast.timeoutId = window.setTimeout(() => toast.classList.remove("show"), 2600);
+}
+
+function formatToday() {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date());
+}
+
+function updateClock() {
+  document.querySelector("#statusTime").textContent = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+}
+
+function ndcMatchMarkup(medication) {
+  const match = medication.ndcMatch;
+  const name = match.rxNormName || match.genericName || "this medication";
+  const rxcui = match.rxcui ? ` (RxCUI ${match.rxcui})` : "";
+  const ndc = medication.ndc ? `NDC ${medication.ndc} matched to ` : "";
+  return `${ndc}${name}${rxcui}`;
+}
+
+function priceSummaryMarkup(priceInfo, drugName) {
+  if (!priceInfo) return "Price comparison unavailable.";
+  if (priceInfo.estimatedPrice == null) {
+    return `No pricing data found for ${drugName}.` +
+      (priceInfo.goodRxLink ? ` <a href="${priceInfo.goodRxLink}" target="_blank" rel="noopener">Check GoodRx</a>` : "");
+  }
+  if (priceInfo.cheaperAlternative) {
+    return `💰 A cheaper option may be available: ${priceInfo.cheaperAlternative.name}. <a href="${priceInfo.cheaperAlternative.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>`;
+  }
+  return `No cheaper alternative found for ${drugName}.` +
+    (priceInfo.goodRxLink ? ` <a href="${priceInfo.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>` : "");
+}
+
+function medicationCard(medication) {
+  const expanded = state.expandedMedicationId === medication.id;
+  const percentage = Math.min(100, Math.round((medication.current / medication.total) * 100));
+
+  return `
+    <article class="med-card ${expanded ? "expanded" : ""}" data-medication-id="${medication.id}">
+      <button class="med-summary" type="button" aria-expanded="${expanded}">
+        <span class="pill-icon" style="--accent:${medication.accent}; --icon-bg:${medication.iconBg}">
+          ${icon("pill")}
+        </span>
+        <span class="med-main">
+          <span class="med-title">${medication.name}</span>
+          <span class="med-subtitle">${medication.subtitle}</span>
+          <span class="med-progress-row">
+            <span class="med-progress-track"><span style="width:${percentage}%; background:${medication.accent}"></span></span>
+            <span class="med-count">${medication.current}/${medication.total}</span>
+          </span>
+        </span>
+        ${icon(expanded ? "chevron-up" : "chevron-down", "chevron")}
+      </button>
+
+      ${expanded ? `
+        <div class="med-details">
+          <section class="detail-panel">
+            <div class="detail-label">${icon("pill")} <span>TREATS</span></div>
+            <p>${medication.treats}</p>
+          </section>
+          <section class="detail-panel">
+            <div class="detail-label">${icon("stethoscope")} <span>DOCTOR INSTRUCTIONS</span></div>
+            <p>${medication.instructions}</p>
+          </section>
+          <section class="detail-panel">
+            <div class="detail-label">${icon("hash")} <span>DOSAGE</span></div>
+            <p>${medication.dosage}</p>
+          </section>
+          ${medication.ndcMatch ? `
+            <section class="detail-panel">
+              <div class="detail-label">${icon("check")} <span>NDC MATCH</span></div>
+              <p>${ndcMatchMarkup(medication)}</p>
+            </section>
+          ` : ""}
+          ${medication.priceInfo ? `
+            <section class="detail-panel">
+              <div class="detail-label">${icon("dollar-sign")} <span>PRICE &amp; SAVINGS</span></div>
+              <p>${priceSummaryMarkup(medication.priceInfo, medication.name)}</p>
+            </section>
+          ` : ""}
+          <div class="detail-grid">
+            <section class="detail-panel compact">
+              <div class="detail-label">${icon("pill")} <span>TABLETS REMAINING</span></div>
+              <p>${medication.current} of ${medication.total}</p>
+            </section>
+            <section class="detail-panel compact">
+              <div class="detail-label">${icon("calendar-days")} <span>LAST PICKUP</span></div>
+              <p>${medication.lastPickup}</p>
+            </section>
+          </div>
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function medicationsScreen() {
+  return `
+    <section class="screen medications-screen">
+      <div class="screen-scroll">
+        <header class="page-header">
+          <h1>My Medication</h1>
+          <p>${state.medications.length} active prescriptions</p>
+        </header>
+        <div class="med-list">
+          ${state.medications.map(medicationCard).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function remindersScreen() {
+  const total = state.reminders.length;
+  const taken = state.reminders.filter((item) => item.taken).length;
+  const percentage = Math.round((taken / total) * 100);
+  const periodMeta = {
+    morning: { label: "MORNING", color: "#f3a642" },
+    evening: { label: "EVENING", color: "#9869e9" },
+    night: { label: "NIGHT", color: "#0f2438" },
+  };
+
+  return `
+    <section class="screen reminders-screen">
+      <div class="screen-scroll">
+        <header class="page-header reminders-header">
+          <h1>Reminders</h1>
+          <p>Today – ${formatToday()}</p>
+        </header>
+
+        <section class="daily-progress-card">
+          <div>
+            <span>Today's Progress</span>
+            <strong>${taken} / ${total} doses taken</strong>
+          </div>
+          <span class="progress-percent">${percentage}%</span>
+          <div class="daily-track"><span style="width:${percentage}%"></span></div>
+        </section>
+
+        <div class="reminder-groups">
+          ${Object.entries(periodMeta).map(([period, meta]) => {
+            const items = state.reminders.filter((item) => item.period === period);
+            return `
+              <section class="reminder-group">
+                <h2><span style="background:${meta.color}"></span>${meta.label}</h2>
+                <div class="reminder-list">
+                  ${items.map((item) => `
+                    <button class="reminder-card ${item.taken ? "taken" : ""}" type="button" data-reminder-id="${item.id}">
+                      <span class="dose-check">${item.taken ? icon("check") : ""}</span>
+                      <span class="dose-copy">
+                        <strong>${item.medication}</strong>
+                        <span>${item.detail}</span>
+                      </span>
+                      <span class="dose-time">${icon("clock-3")} ${item.time}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              </section>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function cameraScreen() {
+  const step = state.camera.step;
+  const scanningFront = step === 1;
+  return `
+    <section class="screen camera-screen">
+      <div class="camera-top">
+        <h1>Scan Prescription</h1>
+        <p>Patient Information Leaflet</p>
+        <div class="scan-steps">
+          <div class="scan-step active">
+            <span>1</span>
+            <div><strong>Front Side</strong><small>${step > 1 ? "Captured" : "Ready to scan"}</small></div>
+          </div>
+          <div class="step-line ${step > 1 ? "complete" : ""}"></div>
+          <div class="scan-step ${step > 1 ? "active" : ""}">
+            <span>2</span>
+            <div><strong>Back Side</strong><small>${step > 1 ? "Ready to scan" : "Pending"}</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="viewfinder-wrap">
+        <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
+        <canvas id="captureCanvas" hidden></canvas>
+        <div class="viewfinder-overlay">
+          <span class="corner corner-tl"></span>
+          <span class="corner corner-tr"></span>
+          <span class="corner corner-bl"></span>
+          <span class="corner corner-br"></span>
+          <p id="cameraMessage" class="camera-message">${state.camera.message}</p>
+          <p class="align-copy">Align ${scanningFront ? "Front" : "Back"} Side within frame</p>
+        </div>
+      </div>
+
+      <div class="capture-area">
+        <button id="captureButton" class="capture-button ${state.camera.busy ? "busy" : ""}" type="button" aria-label="${state.camera.stream ? "Capture image" : "Enable camera"}">
+          <span></span>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function financialsScreen() {
+  return `
+    <section class="screen utility-screen">
+      <div class="screen-scroll">
+        <header class="page-header">
+          <h1>Financials</h1>
+          <p>Medication costs and savings</p>
+        </header>
+        <section class="feature-card hero-feature">
+          <span class="feature-icon">${icon("wallet-cards")}</span>
+          <div><small>Estimated monthly cost</small><strong>$42.80</strong></div>
+        </section>
+        <section class="feature-card">
+          <h2>Backend connection</h2>
+          <p>Connect <code>GET /api/financials/summary</code> to display insurance, coupon, and out-of-pocket comparisons here.</p>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function pharmacyScreen() {
+  return `
+    <section class="screen utility-screen">
+      <div class="screen-scroll">
+        <header class="page-header">
+          <h1>Pharmacy</h1>
+          <p>Find nearby pickup options</p>
+        </header>
+        <section class="feature-card hero-feature pharmacy-feature">
+          <span class="feature-icon">${icon("map-pin")}</span>
+          <div><small>Closest pharmacy</small><strong>1.2 miles away</strong></div>
+        </section>
+        <section class="feature-card">
+          <h2>Backend connection</h2>
+          <p>Connect <code>GET /api/pharmacies/nearby</code> to populate live pharmacy locations, prices, and pickup availability.</p>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+const renderers = {
+  medications: medicationsScreen,
+  reminders: remindersScreen,
+  camera: cameraScreen,
+  financials: financialsScreen,
+  pharmacy: pharmacyScreen,
+};
+
+function setActiveNavigation() {
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    item.classList.toggle("active", item.dataset.screen === state.screen);
+  });
+  document.querySelector(".phone-screen").classList.toggle("camera-mode", state.screen === "camera");
+}
+
+function render() {
+  screenHost.innerHTML = renderers[state.screen]();
+  setActiveNavigation();
+  bindScreenEvents();
+  refreshIcons();
+
+  if (state.screen === "camera" && state.camera.stream) {
+    const video = document.querySelector("#cameraVideo");
+    video.srcObject = state.camera.stream;
+    document.querySelector("#cameraMessage").textContent = state.camera.busy ? state.camera.message : "";
+  }
+}
+
+function bindScreenEvents() {
+  document.querySelectorAll(".med-summary").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = button.closest(".med-card").dataset.medicationId;
+      state.expandedMedicationId = state.expandedMedicationId === id ? null : id;
+      render();
+    });
+  });
+
+  document.querySelectorAll(".reminder-card").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const reminder = state.reminders.find((item) => item.id === button.dataset.reminderId);
+      if (!reminder) return;
+
+      reminder.taken = !reminder.taken;
+      render();
+
+      if (!DEV_USE_MOCKS) {
+        try {
+          await api.updateReminder(reminder.id, reminder.taken);
+        } catch (error) {
+          reminder.taken = !reminder.taken;
+          render();
+          showToast(error.message);
+        }
+      }
+    });
+  });
+
+  document.querySelector("#captureButton")?.addEventListener("click", handleCameraButton);
+}
+
+async function startCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    state.camera.message = "Camera is unavailable in this browser.";
+    render();
+    return;
   }
 
-  if (/(once|1 time|qd).*(day|daily)/.test(normalized) || /every 24 hours/.test(normalized)) {
-    return { label: "Once daily", value: 1, intervalHours: 24 };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false,
+    });
+    state.camera.stream = stream;
+    state.camera.message = "";
+    render();
+  } catch (error) {
+    state.camera.message = "Camera access denied. Allow camera permission and try again.";
+    render();
   }
-
-  if (/(three|3 times).*(day|daily)/.test(normalized) || /every 8 hours/.test(normalized)) {
-    return { label: "Three times daily", value: 3, intervalHours: 8 };
-  }
-
-  return { label: "Needs review", value: null, intervalHours: null };
 }
 
-function parseStrength(text) {
-  const match = text.match(/\b\d+\s*(?:mg|mcg|g|ml|tablet|capsule|pill)\b/i);
-  return match ? match[0] : "";
+function captureFrame() {
+  const video = document.querySelector("#cameraVideo");
+  const canvas = document.querySelector("#captureCanvas");
+  if (!video?.videoWidth) return null;
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
 }
 
-function parseNdc(text) {
-  const match = text.match(/(\d{4,5}-\d{3,4}-\d{2})|(\d{10,11})/g);
-  if (!match) return "";
-  const normalized = match[0].replace(/[^\d]/g, '');
-  if (normalized.length === 10 || normalized.length === 11) {
-    return match[0];
-  }
-  return "";
-}
-
-function parseDose(text) {
-  const match = text.match(/\btake\s+(\d+\s*(?:tablet|capsule|pill|ml|mL|drop|spray|puff)s?)\b/i);
-  if (match) return match[1];
-  const fallback = text.match(/\b\d+\s*(?:tablet|capsule|pill|ml|mL|drop|spray|puff)\b/i);
-  return fallback ? fallback[0] : "";
-}
-
-function parseInstructions(text) {
-  const lowered = text.toLowerCase();
-  if (/take by mouth/.test(lowered)) return "Take by mouth";
-  if (/take with food/.test(lowered)) return "Take with food";
-  if (/as directed/.test(lowered)) return "Take as directed";
-  if (/take .* daily/.test(lowered)) return "Take daily";
-  return "";
-}
-
-function parseQuantity(text) {
-  const lowered = text.toLowerCase();
-  const qtyMatch = lowered.match(/(?:quantity|qty|dispensed)\s*[:\-]?\s*(\d+)\b/);
-  if (qtyMatch) return qtyMatch[1];
-
-  const dayMatch = lowered.match(/(\d+)\s*day(?:s)?\s*(?:supply)?/);
-  if (dayMatch) return `${dayMatch[1]}-day supply`;
-
-  const countMatch = lowered.match(/(\d+)\s*(?:tablet|capsule|pill|tab|cap)s?\b/);
-  if (countMatch) return `${countMatch[1]} tablets`;
-
-  return "";
-}
-
-function parseCost(text) {
-  const match = text.match(/\$\s?(\d+(?:\.\d{1,2})?)/);
-  return match ? `$${match[1]}` : "";
-}
-
-function normalizeCost(text) {
-  const value = Number(String(text).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(value) ? value : null;
-}
-
-function setLookupStatus(message, type = "info") {
-  lookupStatus.textContent = message;
-  lookupStatus.style.backgroundColor = type === "error" ? "#fee2e2" : "#eef2ff";
-  lookupStatus.style.color = type === "error" ? "#991b1b" : "#1e293b";
-}
-
-function setPriceSummary(message, linkHtml = "") {
-  priceSummary.innerHTML = `${message}${linkHtml ? ` <span>${linkHtml}</span>` : ""}`;
-}
-
-
-function parseInsurance(text) {
-  const lowered = text.toLowerCase();
-  const patterns = [
-    /run through insurance/,
-    /submitted to (?:insurance|insurer)/,
-    /processed (?:through|by) (?:insurance|insurer)/,
-    /insurance (?:claim|coverage|processed|submitted)/,
-    /copay/,
-    /rx billed to insurance/,
-    /bill(?:ed)? to insurance/
-  ];
-  return patterns.some((p) => p.test(lowered));
-}
-
-function parseMedication(frontValue, backValue) {
-  const combinedText = `${frontValue}\n${backValue}`.trim();
-  const frequencyInfo = parseFrequency(combinedText);
-  const detectedNdc = parseNdc(combinedText);
+function buildMedicationFromScan(scan) {
+  const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
+  const name = scan.match?.rxNormName || scan.match?.genericName || "Medication from label";
+  const quantity = scan.quantity || scan.priceInfo?.unitCount || 30;
+  const dosagePieces = [scan.strength, scan.dose, scan.frequency].filter(Boolean);
 
   return {
-    medicationName: /amoxicillin/i.test(combinedText) ? "Amoxicillin" : "Medication from label",
-    strength: parseStrength(combinedText),
-    dose: parseDose(combinedText),
-    frequency: frequencyInfo.label,
-    frequencyValue: frequencyInfo.value,
-    intervalHours: frequencyInfo.intervalHours,
-    instructions: parseInstructions(combinedText),
-    ndc: detectedNdc,
-    cost: parseCost(combinedText),
-    quantity: parseQuantity(combinedText),
-    insuranceUsed: parseInsurance(combinedText),
-    notes: backValue ? "Front and back label data captured" : "Parsed from placeholder OCR"
-  };
-}
-
-async function lookupNdc() {
-  const rawNdc = ndc.value.trim();
-  if (!rawNdc) {
-    setLookupStatus('Enter the NDC from the label before matching.', 'error');
-    return;
-  }
-
-  setLookupStatus('Looking up NDC in RxNorm...', 'info');
-  priceSummary.textContent = '';
-
-  try {
-    const response = await fetch('/api/ndc-lookup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ndc: rawNdc })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'NDC lookup failed');
-    }
-
-    currentLookup = data;
-    medName.value = data.rxNormName || data.genericName || medName.value;
-    ndc.value = data.ndc || ndc.value;
-    currentLookup.genericName = data.genericName || data.rxNormName || medName.value;
-
-    const label = data.locked ? 'Matched' : 'Partial match';
-    const properties = [data.rxNormName || data.genericName, data.rxcui ? `RxCUI: ${data.rxcui}` : null]
-      .filter(Boolean)
-      .join(' · ');
-
-    setLookupStatus(`${label}: ${properties}`, data.locked ? 'info' : 'warning');
-  } catch (error) {
-    setLookupStatus(error.message, 'error');
-  }
-}
-
-async function comparePrice() {
-  const drugName = medName.value.trim();
-  const paidAmount = normalizeCost(cost.value);
-  const quantityValue = quantity.value.trim();
-
-  if (!drugName) {
-    setPriceSummary('Enter a medication name before comparing price.');
-    return;
-  }
-
-  if (paidAmount === null) {
-    setPriceSummary('Enter a valid paid cost amount before comparing price.');
-    return;
-  }
-
-  setPriceSummary('Comparing prices...', '');
-
-  try {
-    const response = await fetch('/api/price-compare', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        drugName,
-        genericName: currentLookup?.genericName || '',
-        ndc: ndc.value.trim(),
-        quantity: quantityValue,
-        paidCost: paidAmount
-      })
-    });
-
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || 'Price comparison failed');
-    }
-
-    currentPriceCompare = result;
-
-    if (result.quantityDefaulted && result.unitCount) {
-      quantity.value = `${result.unitCount} tablets (assumed)`;
-    }
-
-    if (result.estimatedPrice == null) {
-      setPriceSummary('No pricing data found for this medication.',
-        result.goodRxLink ? `<a href="${result.goodRxLink}" target="_blank" rel="noopener">Check GoodRx</a>` : '');
-      return;
-    }
-
-    if (result.cheaperAlternative) {
-      setPriceSummary(
-        `💰 A cheaper option may be available: ${result.cheaperAlternative.name}.`,
-        `<a href="${result.cheaperAlternative.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>`
-      );
-    } else if (result.goodRxLink) {
-      setPriceSummary(
-        `No cheaper alternative found for ${drugName}.`,
-        `<a href="${result.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>`
-      );
-    } else {
-      setPriceSummary(`No cheaper alternative found for ${drugName}.`, '');
-    }
-  } catch (error) {
-    setPriceSummary(error.message, '');
-  }
-}
-
-function populateFormFromText() {
-  const parsed = parseMedication(frontText.value, backText.value);
-  medName.value = parsed.medicationName;
-  strength.value = parsed.strength;
-  dose.value = parsed.dose;
-  frequency.value = parsed.frequency;
-  ndc.value = parsed.ndc;
-  cost.value = parsed.cost;
-  quantity.value = parsed.quantity;
-  instructions.value = parsed.instructions;
-  insuranceUsed.checked = parsed.insuranceUsed;
-  notes.value = parsed.notes;
-}
-
-async function handleImageUpload(input, preview, targetText) {
-  const file = input.files?.[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    preview.src = event.target.result;
-    preview.style.display = "block";
-  };
-  reader.readAsDataURL(file);
-
-  targetText.value = "Scanning label...";
-  try {
-    const { data } = await Tesseract.recognize(file, "eng");
-    targetText.value = data.text.trim() || "No text detected. Try a clearer, well-lit photo.";
-  } catch (error) {
-    console.error("OCR failed", error);
-    targetText.value = "OCR failed to read this image. Try again with a clearer photo.";
-  }
-  populateFormFromText();
-}
-
-function saveMedication() {
-  const record = {
     id: crypto.randomUUID(),
-    medicationName: medName.value || "Medication",
-    rxNormName: currentLookup?.rxNormName || "",
-    rxcui: currentLookup?.rxcui || "",
-    matchedByNdc: Boolean(currentLookup?.locked),
-    strength: strength.value || "",
-    dose: dose.value || "",
-    frequency: frequency.value || "Needs review",
-    quantity: quantity.value || "",
-    instructions: instructions.value || "",
-    ndc: ndc.value || "",
-    cost: cost.value || "",
-    insuranceUsed: insuranceUsed.checked,
-    notes: notes.value || "",
-    priceComparison: priceSummary.textContent || "",
-    goodRxLink: currentPriceCompare?.goodRxLink || "",
-    cheaperAlternativeName: currentPriceCompare?.cheaperAlternative?.name || "",
-    cheaperAlternativeLink: currentPriceCompare?.cheaperAlternative?.goodRxLink || "",
-    frontText: frontText.value || "",
-    backText: backText.value || "",
-    frontImageName: frontImageInput.files?.[0]?.name || "",
-    backImageName: backImageInput.files?.[0]?.name || "",
-    source: "Tesseract OCR",
-    createdAt: new Date().toLocaleString()
+    scanned: true,
+    name,
+    subtitle: [scan.strength, scan.dose].filter(Boolean).join(" ") || "Scanned from label",
+    accent: palette.accent,
+    iconBg: palette.iconBg,
+    current: quantity,
+    total: quantity,
+    treats: "Not available from label scan yet",
+    instructions: scan.instructions || "Not detected — check the printed leaflet",
+    dosage: dosagePieces.length ? dosagePieces.join(" – ") : "Not detected",
+    lastPickup: formatToday(),
+    ndc: scan.ndc || "",
+    ndcMatch: scan.match,
+    priceInfo: scan.priceInfo,
   };
-
-  const records = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  records.unshift(record);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-  renderRecords();
-  clearForm();
 }
 
-function clearForm() {
-  medName.value = "";
-  strength.value = "";
-  dose.value = "";
-  frequency.value = "";
-  instructions.value = "";
-  ndc.value = "";
-  cost.value = "";
-  insuranceUsed.checked = false;
-  notes.value = "";
-  frontText.value = "";
-  backText.value = "";
-  frontImageInput.value = "";
-  backImageInput.value = "";
-  frontPreview.style.display = "none";
-  backPreview.style.display = "none";
-}
-
-function renderRecords() {
-  const records = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-  countBadge.textContent = `${records.length} saved`;
-
-  if (!records.length) {
-    recordList.innerHTML = '<p class="empty-state">No medications saved yet.</p>';
+async function handleCameraButton() {
+  if (state.camera.busy) return;
+  if (!state.camera.stream) {
+    await startCamera();
     return;
   }
 
-  recordList.innerHTML = records
-    .map(
-      (record) => `
-        <article class="record-card">
-          <h3>${record.medicationName}</h3>
-          <p><strong>RxNorm:</strong> ${record.rxNormName || "—"} ${record.rxcui ? `(${record.rxcui})` : ""}</p>
-          <p><strong>Strength:</strong> ${record.strength || "—"}</p>
-          <p><strong>Dose:</strong> ${record.dose || "—"}</p>
-          <p><strong>Frequency:</strong> ${record.frequency}</p>
-          <p><strong>Instructions:</strong> ${record.instructions || "—"}</p>
-          <p><strong>NDC:</strong> ${record.ndc || "Not detected"}</p>
-          <p><strong>Cost:</strong> ${record.cost || "—"}</p>
-          ${record.quantity ? `<p><strong>Quantity/supply:</strong> ${record.quantity}</p>` : ""}
-          <p><strong>Price summary:</strong> ${record.priceComparison || "—"}</p>
-          ${record.cheaperAlternativeName
-            ? `<p><strong>Cheaper option:</strong> ${record.cheaperAlternativeName} — <a href="${record.cheaperAlternativeLink}" target="_blank" rel="noopener">see current price on GoodRx</a></p>`
-            : record.goodRxLink
-            ? `<p><a href="${record.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a></p>`
-            : ""}
-          <p><strong>Insurance:</strong> ${record.insuranceUsed ? "Yes" : "No"}</p>
-          <p><strong>Saved:</strong> ${record.createdAt}</p>
-        </article>
-      `
-    )
-    .join("");
+  const blob = await captureFrame();
+  if (!blob) {
+    showToast("The camera is still loading.");
+    return;
+  }
+
+  if (state.camera.step === 1) {
+    state.camera.frontBlob = blob;
+    state.camera.step = 2;
+    render();
+    showToast("Front side captured. Now scan the back side.");
+    return;
+  }
+
+  state.camera.backBlob = blob;
+  state.camera.busy = true;
+  state.camera.message = "Reading label and checking prices…";
+  render();
+
+  try {
+    const scan = await api.scanPrescription(state.camera.frontBlob, state.camera.backBlob);
+    const medication = buildMedicationFromScan(scan);
+    state.medications.unshift(medication);
+    persistScannedMedications();
+    state.expandedMedicationId = medication.id;
+    state.screen = "medications";
+    stopCamera();
+    resetCameraScan();
+    showToast(
+      medication.priceInfo?.cheaperAlternative
+        ? `${medication.name} scanned — cheaper option available!`
+        : `${medication.name} scanned successfully.`
+    );
+  } catch (error) {
+    state.camera.busy = false;
+    state.camera.message = "";
+    render();
+    showToast(error.message || "Scan failed. Try again with a clearer photo.");
+  }
 }
 
-frontImageInput.addEventListener("change", () => {
-  handleImageUpload(frontImageInput, frontPreview, frontText);
-});
+function resetCameraScan() {
+  state.camera.step = 1;
+  state.camera.frontBlob = null;
+  state.camera.backBlob = null;
+  state.camera.busy = false;
+  state.camera.message = "Tap the shutter to enable your camera.";
+  render();
+}
 
-backImageInput.addEventListener("change", () => {
-  handleImageUpload(backImageInput, backPreview, backText);
-});
+function stopCamera() {
+  state.camera.stream?.getTracks().forEach((track) => track.stop());
+  state.camera.stream = null;
+}
 
-sampleBtn.addEventListener("click", () => {
-  frontText.value = sampleFrontText;
-  backText.value = sampleBackText;
-  populateFormFromText();
-  frontPreview.style.display = "none";
-  backPreview.style.display = "none";
-});
-
-ndcLookupBtn.addEventListener("click", lookupNdc);
-priceCompareBtn.addEventListener("click", comparePrice);
-saveBtn.addEventListener("click", saveMedication);
-
-[frontText, backText].forEach((element) => {
-  element.addEventListener("input", () => {
-    populateFormFromText();
-    setLookupStatus('');
-    setPriceSummary('');
-    currentLookup = null;
-    currentPriceCompare = null;
+document.querySelectorAll(".nav-item").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (button.dataset.screen !== "camera" && state.screen === "camera") stopCamera();
+    state.screen = button.dataset.screen;
+    render();
   });
 });
 
-renderRecords();
+window.addEventListener("beforeunload", stopCamera);
+
+async function loadBackendData() {
+  if (DEV_USE_MOCKS) return;
+  try {
+    const [medications, reminders] = await Promise.all([
+      api.getMedications(),
+      api.getTodayReminders(),
+    ]);
+    state.medications = medications;
+    state.reminders = reminders;
+    render();
+  } catch (error) {
+    showToast(`Backend unavailable: ${error.message}`);
+  }
+}
+
+updateClock();
+setInterval(updateClock, 30_000);
+render();
+loadBackendData();

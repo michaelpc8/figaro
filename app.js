@@ -321,9 +321,14 @@ function cameraScreen() {
       </div>
 
       <div class="capture-area">
+        <button id="uploadTriggerButton" class="upload-button" type="button" aria-label="Upload a photo instead">
+          ${icon("upload")}
+        </button>
         <button id="captureButton" class="capture-button ${state.camera.busy ? "busy" : ""}" type="button" aria-label="${state.camera.stream ? "Capture image" : "Enable camera"}">
           <span></span>
         </button>
+        <span class="capture-spacer"></span>
+        <input id="uploadInput" type="file" accept="image/*" hidden />
       </div>
     </section>
   `;
@@ -356,24 +361,8 @@ function pharmacyScreen() {
       <div class="screen-scroll">
         <header class="page-header">
           <h1>PharmYard</h1>
-          <p>Your prescription pickup hub</p>
+          <p>Coming soon</p>
         </header>
-        <section class="feature-card hero-feature pharmacy-feature">
-          <span class="feature-icon">${icon("store")}</span>
-          <div><small>Closest pickup spot</small><strong>1.2 miles away</strong></div>
-        </section>
-        <section class="feature-card pharmacy-detail">
-          <h2>What you can do here</h2>
-          <ul class="pharmacy-list">
-            <li>Compare nearby pickup options</li>
-            <li>Check refill and price availability</li>
-            <li>Save the best option for later</li>
-          </ul>
-        </section>
-        <section class="feature-card">
-          <h2>Backend connection</h2>
-          <p>Connect <code>GET /api/pharmacies/nearby</code> to populate live pharmacy locations, prices, and pickup availability.</p>
-        </section>
       </div>
     </section>
   `;
@@ -437,6 +426,16 @@ function bindScreenEvents() {
   });
 
   document.querySelector("#captureButton")?.addEventListener("click", handleCameraButton);
+
+  document.querySelector("#uploadTriggerButton")?.addEventListener("click", () => {
+    document.querySelector("#uploadInput")?.click();
+  });
+
+  document.querySelector("#uploadInput")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) await handleCapturedBlob(file);
+  });
 }
 
 async function startCamera() {
@@ -448,28 +447,81 @@ async function startCamera() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
       audio: false,
     });
     state.camera.stream = stream;
     state.camera.message = "";
     render();
   } catch (error) {
-    state.camera.message = "Camera access denied. Allow camera permission and try again.";
+    const reasons = {
+      NotAllowedError: "Camera access denied. Allow camera permission for this site and try again.",
+      NotFoundError: "No camera found on this device.",
+      NotReadableError: "Camera is already in use by another app or browser tab. Close it and try again.",
+      OverconstrainedError: "Camera doesn't support the requested settings.",
+      SecurityError: "Camera requires HTTPS or localhost — this page isn't served securely.",
+    };
+    state.camera.message = reasons[error.name] || `Camera error: ${error.name || error.message}`;
     render();
   }
 }
 
+// Matches the .corner-* guide overlay insets (see styles.css) so the capture
+// is cropped to the label the user aligns in frame, not the whole scene.
+const VIEWFINDER_GUIDE_INSET = { top: 86, bottom: 87, left: 22, right: 22 };
+
+function computeVideoCropRect(video, wrapRect) {
+  const videoAspect = video.videoWidth / video.videoHeight;
+  const wrapAspect = wrapRect.width / wrapRect.height;
+
+  let renderedWidth, renderedHeight, offsetX, offsetY;
+  if (videoAspect > wrapAspect) {
+    renderedHeight = wrapRect.height;
+    renderedWidth = renderedHeight * videoAspect;
+    offsetX = (renderedWidth - wrapRect.width) / 2;
+    offsetY = 0;
+  } else {
+    renderedWidth = wrapRect.width;
+    renderedHeight = renderedWidth / videoAspect;
+    offsetX = 0;
+    offsetY = (renderedHeight - wrapRect.height) / 2;
+  }
+
+  const scale = video.videoWidth / renderedWidth;
+  const nativeX = (VIEWFINDER_GUIDE_INSET.left + offsetX) * scale;
+  const nativeY = (VIEWFINDER_GUIDE_INSET.top + offsetY) * scale;
+  const nativeWidth = (wrapRect.width - VIEWFINDER_GUIDE_INSET.left - VIEWFINDER_GUIDE_INSET.right) * scale;
+  const nativeHeight = (wrapRect.height - VIEWFINDER_GUIDE_INSET.top - VIEWFINDER_GUIDE_INSET.bottom) * scale;
+
+  const x = Math.max(0, Math.min(nativeX, video.videoWidth));
+  const y = Math.max(0, Math.min(nativeY, video.videoHeight));
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(nativeWidth, video.videoWidth - x)),
+    height: Math.max(1, Math.min(nativeHeight, video.videoHeight - y)),
+  };
+}
+
 function captureFrame() {
   const video = document.querySelector("#cameraVideo");
+  const wrap = document.querySelector(".viewfinder-wrap");
   const canvas = document.querySelector("#captureCanvas");
-  if (!video?.videoWidth) return null;
+  if (!video?.videoWidth || !wrap) return null;
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  const crop = computeVideoCropRect(video, wrap.getBoundingClientRect());
 
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+  canvas.width = crop.width;
+  canvas.height = crop.height;
+  canvas
+    .getContext("2d")
+    .drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
 }
 
 function buildMedicationFromScan(scan) {
@@ -507,6 +559,15 @@ async function handleCameraButton() {
   const blob = await captureFrame();
   if (!blob) {
     showToast("The camera is still loading.");
+    return;
+  }
+
+  await handleCapturedBlob(blob);
+}
+
+async function handleCapturedBlob(blob) {
+  if (state.camera.busy) {
+    showToast("Still processing the last scan — hang tight.");
     return;
   }
 

@@ -50,45 +50,9 @@ body {
   background: var(--screen);
 }
 
-.status-bar {
-  height: 45px;
-  position: absolute;
-  z-index: 20;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  padding: 0 21px;
-  background: var(--screen);
-}
-
-.status-time { font-size: 12px; font-weight: 700; align-self: start; margin-top: 14px; }
-
-.dynamic-island {
-  width: 120px;
-  height: 34px;
-  border-radius: 20px;
-  background: #000;
-  margin-top: 3px;
-}
-
-.status-icons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-  color: #4d5a6a;
-  align-self: start;
-  margin-top: 14px;
-}
-
-.status-icon { width: 14px; height: 14px; stroke-width: 2.6; }
-.status-battery { width: 19px; }
-
 .screen-host {
   position: absolute;
-  inset: 45px 0 var(--nav-height);
+  inset: 0 0 var(--nav-height);
   overflow: hidden;
 }
 
@@ -231,8 +195,6 @@ body {
 .reminder-card.taken .dose-copy { text-decoration: line-through; color: #7e8997; }
 .reminder-card.taken .dose-copy span { color: #a4afbc; }
 
-.camera-mode .status-bar { background: #000; color: #fff; }
-.camera-mode .status-icons { color: #b8c2ca; }
 .camera-mode .screen-host { background: #0e0e0e; }
 .camera-screen { display: grid; grid-template-rows: 116px 1fr 108px; background: #0f0f0f; color: #fff; }
 .camera-top { padding: 17px 20px 11px; background: #000; }

@@ -124,14 +124,6 @@ function formatToday() {
   }).format(new Date());
 }
 
-function updateClock() {
-  document.querySelector("#statusTime").textContent = new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
-}
-
 function ndcMatchMarkup(medication) {
   const match = medication.ndcMatch;
   const name = match.rxNormName || match.genericName || "this medication";
@@ -659,7 +651,5 @@ async function loadBackendData() {
   }
 }
 
-updateClock();
-setInterval(updateClock, 30_000);
 render();
 loadBackendData();

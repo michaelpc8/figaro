@@ -87,6 +87,23 @@
             <input id="cost" type="text" placeholder="e.g. $14.50" />
           </div>
         </div>
+        <div class="field-block">
+          <label class="field-label" for="quantity">Quantity / supply</label>
+          <input id="quantity" type="text" placeholder="e.g. 30 tablets or 30-day supply" />
+        </div>
+
+        <div class="grid two-up">
+          <button id="ndcLookupBtn" class="secondary-btn">Match NDC and lock medication</button>
+          <button id="priceCompareBtn" class="secondary-btn">Compare price</button>
+        </div>
+
+        <div id="lookupStatus" class="status-block"></div>
+        <div id="priceSummary" class="status-block"></div>
+
+        <div class="field-block">
+          <label class="field-label" for="notes">Notes</label>
+          <input id="notes" type="text" placeholder="e.g. Insurance claim noted" />
+        </div>
 
         <div class="field-block">
           <label class="field-label" for="instructions">Instructions</label>
@@ -110,6 +127,7 @@
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

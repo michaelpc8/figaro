@@ -1,0 +1,172 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #eef2ff;
+  color: #101828;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f7f8ff 0%, #e7e9ff 100%);
+}
+
+.app-shell {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.card,
+.hero-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 24px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.06);
+}
+
+.hero-card {
+  border: none;
+  box-shadow: none;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.75rem;
+  color: #4338ca;
+  margin: 0 0 12px;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+.subtitle {
+  margin-top: 12px;
+  line-height: 1.8;
+  color: #475569;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.two-up {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #111827;
+}
+
+input[type='text'],
+textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-size: 1rem;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.upload-zone {
+  display: block;
+  border: 2px dashed #c7d2fe;
+  border-radius: 20px;
+  padding: 28px 20px;
+  text-align: center;
+  color: #4338ca;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.upload-zone input {
+  display: none;
+}
+
+.preview-image {
+  width: 100%;
+  border-radius: 18px;
+  display: none;
+  margin-top: 16px;
+  max-height: 240px;
+  object-fit: contain;
+}
+
+.primary-btn,
+.secondary-btn {
+  border: none;
+  border-radius: 16px;
+  padding: 14px 20px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary-btn {
+  background: #4338ca;
+  color: white;
+  width: 100%;
+}
+
+.secondary-btn {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.checkbox-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  background: #e0e7ff;
+  color: #3730a3;
+  border-radius: 9999px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.record-card {
+  background: #f8fafc;
+  border-radius: 20px;
+  padding: 18px;
+  margin-bottom: 14px;
+}
+
+.record-card h3 {
+  margin-top: 0;
+}
+
+.empty-state {
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .two-up {
+    grid-template-columns: 1fr;
+  }
+}

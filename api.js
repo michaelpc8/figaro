@@ -26,12 +26,53 @@ async function request(path, options = {}) {
   return response.json();
 }
 
-async function ocrImage(blob) {
+// Grayscale + contrast stretch, upscaling small crops. Real phone-camera
+// photos are far noisier than the label itself — this materially improves
+// Tesseract's read rate over feeding it the raw photo.
+async function preprocessForOcr(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const scale = bitmap.width < 900 ? 1.6 : 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const contrasted = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
+    data[i] = data[i + 1] = data[i + 2] = contrasted;
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+}
+
+async function ocrImages(blobs) {
   if (!window.Tesseract) {
     throw new Error("OCR engine failed to load. Check your connection and try again.");
   }
-  const { data } = await window.Tesseract.recognize(blob, "eng");
-  return data.text || "";
+  const worker = await window.Tesseract.createWorker("eng");
+  try {
+    // PSM 6: assume a single uniform block of text — better fit for a label
+    // photo than the default full-page layout analysis.
+    await worker.setParameters({ tessedit_pageseg_mode: "6" });
+    const texts = [];
+    for (const blob of blobs) {
+      if (!blob) {
+        texts.push("");
+        continue;
+      }
+      const processed = await preprocessForOcr(blob);
+      const { data } = await worker.recognize(processed);
+      texts.push(data.text || "");
+    }
+    return texts;
+  } finally {
+    await worker.terminate();
+  }
 }
 
 function extractNdc(text) {
@@ -118,10 +159,7 @@ export const api = {
   // NDC/strength/dose/etc, matches the NDC against RxNorm, and price-checks
   // the match against CMS NADAC data. One call, real data at every step.
   async scanPrescription(frontBlob, backBlob) {
-    const [frontText, backText] = await Promise.all([
-      ocrImage(frontBlob),
-      backBlob ? ocrImage(backBlob) : Promise.resolve(""),
-    ]);
+    const [frontText, backText] = await ocrImages([frontBlob, backBlob]);
     const combinedText = `${frontText}\n${backText}`.trim();
 
     const ndc = extractNdc(combinedText);
@@ -171,9 +209,5 @@ export const api = {
 
   getFinancialSummary() {
     return request("/financials/summary");
-  },
-
-  getNearbyPharmacies() {
-    return request("/pharmacies/nearby");
   },
 };

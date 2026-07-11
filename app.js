@@ -470,54 +470,14 @@ async function startCamera() {
 
 // Matches the .corner-* guide overlay insets (see styles.css) so the capture
 // is cropped to the label the user aligns in frame, not the whole scene.
-const VIEWFINDER_GUIDE_INSET = { top: 86, bottom: 87, left: 22, right: 22 };
-
-function computeVideoCropRect(video, wrapRect) {
-  const videoAspect = video.videoWidth / video.videoHeight;
-  const wrapAspect = wrapRect.width / wrapRect.height;
-
-  let renderedWidth, renderedHeight, offsetX, offsetY;
-  if (videoAspect > wrapAspect) {
-    renderedHeight = wrapRect.height;
-    renderedWidth = renderedHeight * videoAspect;
-    offsetX = (renderedWidth - wrapRect.width) / 2;
-    offsetY = 0;
-  } else {
-    renderedWidth = wrapRect.width;
-    renderedHeight = renderedWidth / videoAspect;
-    offsetX = 0;
-    offsetY = (renderedHeight - wrapRect.height) / 2;
-  }
-
-  const scale = video.videoWidth / renderedWidth;
-  const nativeX = (VIEWFINDER_GUIDE_INSET.left + offsetX) * scale;
-  const nativeY = (VIEWFINDER_GUIDE_INSET.top + offsetY) * scale;
-  const nativeWidth = (wrapRect.width - VIEWFINDER_GUIDE_INSET.left - VIEWFINDER_GUIDE_INSET.right) * scale;
-  const nativeHeight = (wrapRect.height - VIEWFINDER_GUIDE_INSET.top - VIEWFINDER_GUIDE_INSET.bottom) * scale;
-
-  const x = Math.max(0, Math.min(nativeX, video.videoWidth));
-  const y = Math.max(0, Math.min(nativeY, video.videoHeight));
-  return {
-    x,
-    y,
-    width: Math.max(1, Math.min(nativeWidth, video.videoWidth - x)),
-    height: Math.max(1, Math.min(nativeHeight, video.videoHeight - y)),
-  };
-}
-
 function captureFrame() {
   const video = document.querySelector("#cameraVideo");
-  const wrap = document.querySelector(".viewfinder-wrap");
   const canvas = document.querySelector("#captureCanvas");
-  if (!video?.videoWidth || !wrap) return null;
+  if (!video?.videoWidth) return null;
 
-  const crop = computeVideoCropRect(video, wrap.getBoundingClientRect());
-
-  canvas.width = crop.width;
-  canvas.height = crop.height;
-  canvas
-    .getContext("2d")
-    .drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
 
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
 }

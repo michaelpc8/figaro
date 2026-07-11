@@ -355,11 +355,10 @@ function financialsScreen() {
 
 function pharmacyScreen() {
   return `
-    <section class="screen utility-screen">
+    <section class="screen utility-screen pharmacy-screen">
       <div class="screen-scroll">
         <header class="page-header">
           <h1>PharmYard</h1>
-          <p>Coming soon</p>
         </header>
       </div>
     </section>

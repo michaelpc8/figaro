@@ -57,6 +57,9 @@ body {
 }
 
 .screen { height: 100%; background: var(--screen); }
+.pharmacy-screen { background-image: url('GameBackgroundImage.png'); background-size: cover; background-position: top center; background-repeat: no-repeat; background-color: #1f364a; color: #071327; }
+.pharmacy-screen .screen-scroll { background: transparent; }
+.pharmacy-screen .page-header h1 { color: #071327; }
 .screen-scroll { height: 100%; overflow-y: auto; padding: 14px 16px 20px; scrollbar-width: none; }
 .screen-scroll::-webkit-scrollbar { display: none; }
 

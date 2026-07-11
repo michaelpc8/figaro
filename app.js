@@ -355,12 +355,20 @@ function pharmacyScreen() {
     <section class="screen utility-screen">
       <div class="screen-scroll">
         <header class="page-header">
-          <h1>Pharmacy</h1>
-          <p>Find nearby pickup options</p>
+          <h1>PharmYard</h1>
+          <p>Your prescription pickup hub</p>
         </header>
         <section class="feature-card hero-feature pharmacy-feature">
-          <span class="feature-icon">${icon("map-pin")}</span>
-          <div><small>Closest pharmacy</small><strong>1.2 miles away</strong></div>
+          <span class="feature-icon">${icon("store")}</span>
+          <div><small>Closest pickup spot</small><strong>1.2 miles away</strong></div>
+        </section>
+        <section class="feature-card pharmacy-detail">
+          <h2>What you can do here</h2>
+          <ul class="pharmacy-list">
+            <li>Compare nearby pickup options</li>
+            <li>Check refill and price availability</li>
+            <li>Save the best option for later</li>
+          </ul>
         </section>
         <section class="feature-card">
           <h2>Backend connection</h2>

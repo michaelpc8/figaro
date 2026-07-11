@@ -274,7 +274,10 @@ body {
 .hero-feature strong { display: block; margin-top: 4px; font-size: 22px; }
 .feature-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: rgba(255,255,255,.18); }
 .feature-icon svg { width: 24px; height: 24px; }
-.pharmacy-feature { background: linear-gradient(135deg, #6b58c8, #8c75eb); }
+.pharmacy-feature { background: linear-gradient(135deg, #5f45d5, #8d6cff 55%, #33b8db); box-shadow: 0 10px 24px rgba(95, 69, 213, .2); }
+.pharmacy-detail { background: linear-gradient(180deg, #f7f8ff 0%, #ffffff 100%); }
+.pharmacy-list { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.pharmacy-list li { padding: 8px 10px; border-radius: 10px; background: #eef3ff; color: #4a5873; font-size: 12px; }
 
 .bottom-nav {
   position: absolute;

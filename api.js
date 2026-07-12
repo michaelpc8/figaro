@@ -198,8 +198,7 @@ export const api = {
   },
 
   // Runs OCR on both label photos in-browser (Tesseract.js), pulls out the
-  // NDC/strength/dose/etc, matches the NDC against RxNorm, and price-checks
-  // the match against CMS NADAC data. One call, real data at every step.
+  // NDC/strength/dose/etc and matches the NDC against RxNorm.
   async scanPrescription(frontBlob, backBlob) {
     const [frontText, backText] = await ocrImages([frontBlob, backBlob]);
     const combinedText = `${frontText}\n${backText}`.trim();
@@ -210,7 +209,6 @@ export const api = {
     const frequency = extractFrequency(combinedText);
     const instructions = extractInstructions(combinedText);
     const quantity = extractQuantity(combinedText);
-    const cost = extractCost(combinedText);
 
     let match = null;
     if (ndc) {
@@ -222,18 +220,8 @@ export const api = {
     }
 
     const drugName = match?.rxNormName || match?.genericName || "Medication from label";
-    let priceInfo = null;
-    try {
-      priceInfo = await api.comparePrice({
-        drugName,
-        genericName: match?.genericName || "",
-        ndc,
-        quantity: quantity ? `${quantity} tablets` : "",
-        paidCost: cost,
-      });
-    } catch (error) {
-      priceInfo = null;
-    }
+    const goodRxSlug = drugName.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const priceInfo = { goodRxLink: goodRxSlug ? `https://www.goodrx.com/${goodRxSlug}` : "https://www.goodrx.com/" };
 
     return {
       rawText: combinedText,
@@ -243,7 +231,6 @@ export const api = {
       frequency,
       instructions,
       quantity,
-      cost,
       match,
       priceInfo,
     };

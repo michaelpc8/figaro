@@ -28,6 +28,7 @@ const state = {
   deleteConfirmation: null,
   reminderDeleteMode: false,
   reminderFormOpen: false,
+  prescriptionFormOpen: false,
   medications: [
     ...loadScannedMedications(),
     {
@@ -142,16 +143,23 @@ function ndcMatchMarkup(medication) {
 }
 
 function priceSummaryMarkup(priceInfo, drugName) {
-  if (!priceInfo) return "Price comparison unavailable.";
-  if (priceInfo.estimatedPrice == null) {
-    return `No pricing data found for ${drugName}.` +
-      (priceInfo.goodRxLink ? ` <a href="${priceInfo.goodRxLink}" target="_blank" rel="noopener">Check GoodRx</a>` : "");
-  }
-  if (priceInfo.cheaperAlternative) {
-    return `💰 A cheaper option may be available: ${priceInfo.cheaperAlternative.name}. <a href="${priceInfo.cheaperAlternative.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>`;
-  }
-  return `No cheaper alternative found for ${drugName}.` +
-    (priceInfo.goodRxLink ? ` <a href="${priceInfo.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>` : "");
+  const link = priceInfo?.goodRxLink || goodRxCouponsUrl(drugName);
+  return `There may be a cheaper option available on GoodRx. ` +
+    `<a href="${link}" target="_blank" rel="noopener">View coupons and current listings</a>.`;
+}
+
+function goodRxCouponsUrl(drugName) {
+  const slug = String(drugName || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return slug ? `https://www.goodrx.com/${slug}` : "https://www.goodrx.com/";
+}
+
+function combinedPrescriptionInstructions(medication) {
+  const strength = medication.strength ||
+    String(medication.subtitle || medication.dosage || "").match(/\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|%)/i)?.[0] || "";
+  const instructions = medication.instructions && medication.instructions !== "No information added"
+    ? medication.instructions
+    : "No information added";
+  return strength ? `${strength} — ${instructions}` : instructions;
 }
 
 function medicationCard(medication) {
@@ -182,12 +190,8 @@ function medicationCard(medication) {
             <p>${medication.treats}</p>
           </section>
           <section class="detail-panel">
-            <div class="detail-label">${icon("stethoscope")} <span>DOCTOR INSTRUCTIONS</span></div>
-            <p>${medication.instructions}</p>
-          </section>
-          <section class="detail-panel">
-            <div class="detail-label">${icon("hash")} <span>DOSAGE</span></div>
-            <p>${medication.dosage}</p>
+            <div class="detail-label">${icon("stethoscope")} <span>STRENGTH &amp; INSTRUCTIONS</span></div>
+            <p>${combinedPrescriptionInstructions(medication)}</p>
           </section>
           ${medication.ndcMatch ? `
             <section class="detail-panel">
@@ -197,7 +201,7 @@ function medicationCard(medication) {
           ` : ""}
           ${medication.priceInfo ? `
             <section class="detail-panel">
-              <div class="detail-label">${icon("dollar-sign")} <span>PRICE &amp; SAVINGS</span></div>
+              <div class="detail-label">${icon("ticket")} <span>GOODRX COUPONS</span></div>
               <p>${priceSummaryMarkup(medication.priceInfo, medication.name)}</p>
             </section>
           ` : ""}
@@ -229,7 +233,12 @@ function medicationsScreen() {
     <section class="screen medications-screen">
       <div class="screen-scroll">
         <header class="page-header">
-          <h1>My Medication</h1>
+          <div class="medications-title-row">
+            <h1>My Medication</h1>
+            <button id="addPrescriptionButton" class="add-prescription-button" type="button">
+              ${icon("plus")} <span>Add prescription</span>
+            </button>
+          </div>
           <p>${state.medications.length} active prescriptions</p>
         </header>
         <div class="med-list">
@@ -560,6 +569,11 @@ function render() {
 }
 
 function bindScreenEvents() {
+  document.querySelector("#addPrescriptionButton")?.addEventListener("click", () => {
+    state.prescriptionFormOpen = true;
+    render();
+  });
+
   document.querySelectorAll(".med-summary").forEach((button) => {
     button.addEventListener("click", () => {
       const id = button.closest(".med-card").dataset.medicationId;
@@ -706,10 +720,35 @@ function renderConfirmDialog() {
   const dialog = document.querySelector("#confirmDialog");
   if (!dialog) return;
 
-  if (!state.deleteConfirmation && !state.reminderFormOpen) {
+  if (!state.deleteConfirmation && !state.reminderFormOpen && !state.prescriptionFormOpen) {
     dialog.innerHTML = "";
     dialog.classList.add("hidden");
     dialog.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  if (state.prescriptionFormOpen) {
+    dialog.innerHTML = `
+      <form id="prescriptionForm" class="confirm-panel prescription-form" role="dialog" aria-labelledby="prescriptionFormTitle">
+        <h2 id="prescriptionFormTitle">Add prescription</h2>
+        <p>Enter the label details to preview this prescription and access its GoodRx coupon listings.</p>
+        <label>Medication name <input id="prescriptionName" type="text" placeholder="Example: Lisinopril" required></label>
+        <div class="prescription-form-grid">
+          <label>Strength <input id="prescriptionStrength" type="text" placeholder="10 mg"></label>
+          <label>Quantity <input id="prescriptionQuantity" type="number" min="1" value="30" required></label>
+        </div>
+        <label>Directions <input id="prescriptionDirections" type="text" placeholder="Take one tablet daily"></label>
+        <label>What it treats <input id="prescriptionTreats" type="text" placeholder="High blood pressure"></label>
+        <label>NDC (optional) <input id="prescriptionNdc" type="text" inputmode="numeric" placeholder="00000-0000-00"></label>
+        <div class="confirm-actions">
+          <button id="savePrescription" class="confirm-yes" type="submit">Add prescription</button>
+          <button id="cancelPrescription" class="confirm-no" type="button">Cancel</button>
+        </div>
+      </form>
+    `;
+    dialog.classList.remove("hidden");
+    dialog.setAttribute("aria-hidden", "false");
+    bindPrescriptionFormEvents();
     return;
   }
 
@@ -815,6 +854,60 @@ function bindReminderFormEvents() {
   });
 }
 
+function bindPrescriptionFormEvents() {
+  ["#prescriptionDirections", "#prescriptionTreats"].forEach((selector) => {
+    document.querySelector(selector)?.addEventListener("blur", (event) => {
+      const input = event.currentTarget;
+      if (!input.value.trim()) input.value = input.placeholder;
+    });
+  });
+
+  document.querySelector("#cancelPrescription")?.addEventListener("click", () => {
+    state.prescriptionFormOpen = false;
+    render();
+  });
+
+  document.querySelector("#prescriptionForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = document.querySelector("#prescriptionName").value.trim();
+    const strength = document.querySelector("#prescriptionStrength").value.trim();
+    const quantity = Number(document.querySelector("#prescriptionQuantity").value) || 30;
+    const directions = document.querySelector("#prescriptionDirections").value.trim();
+    const treats = document.querySelector("#prescriptionTreats").value.trim();
+    const ndc = document.querySelector("#prescriptionNdc").value.trim();
+    const priceInfo = { goodRxLink: goodRxCouponsUrl(name) };
+
+    const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
+    const medication = {
+      id: crypto.randomUUID(),
+      scanned: true,
+      manual: true,
+      name,
+      subtitle: [name, strength].filter(Boolean).join(" "),
+      accent: palette.accent,
+      iconBg: palette.iconBg,
+      current: quantity,
+      total: quantity,
+      treats: treats || "No information added",
+      instructions: directions || "No information added",
+      dosage: [strength, directions].filter(Boolean).join(" – ") || "No information added",
+      strength,
+      lastPickup: formatToday(),
+      ndc,
+      priceInfo,
+      rawText: "",
+      frequency: "",
+    };
+
+    state.medications.unshift(medication);
+    persistScannedMedications();
+    state.expandedMedicationId = medication.id;
+    state.prescriptionFormOpen = false;
+    render();
+    showToast(`${name} added. GoodRx coupons are available in its details.`);
+  });
+}
+
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
     state.camera.message = "Camera is unavailable in this browser.";
@@ -894,6 +987,7 @@ function buildMedicationFromScan(scan) {
     treats: "Not available from label scan yet",
     instructions: scan.instructions || "Not detected — check the printed leaflet",
     dosage: dosagePieces.length ? dosagePieces.join(" – ") : "Not detected",
+    strength,
     lastPickup: formatToday(),
     ndc: scan.ndc || "",
     ndcMatch: scan.match,

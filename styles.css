@@ -92,6 +92,9 @@ body {
 .page-header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .medications-screen .page-header { padding: 15px 5px 10px; }
 .medications-screen .page-header h1 { font-weight: 800; }
+.medications-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.add-prescription-button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 8px 10px; background: linear-gradient(135deg, #0b8db4, #06ad9c); color: #fff; font-size: 10.5px; font-weight: 700; cursor: pointer; }
+.add-prescription-button svg { width: 15px; height: 15px; }
 
 .med-list { display: grid; gap: 11px; }
 .med-card {
@@ -258,6 +261,15 @@ body {
 .reminder-form label { display: grid; gap: 6px; margin-top: 12px; color: #5c6a7f; font-size: 12px; font-weight: 650; }
 .reminder-form input, .reminder-form select { width: 100%; border: 1px solid #d8e1eb; border-radius: 12px; padding: 10px 11px; background: #fff; color: var(--ink); }
 .reminder-form button:disabled, .reminder-form select:disabled { cursor: not-allowed; opacity: .55; }
+
+.prescription-form { max-height: calc(100% - 24px); overflow-y: auto; text-align: left; }
+.prescription-form h2, .prescription-form > p { text-align: center; }
+.prescription-form label { display: grid; gap: 5px; margin-top: 10px; color: #5c6a7f; font-size: 11.5px; font-weight: 650; }
+.prescription-form input { width: 100%; border: 1px solid #d8e1eb; border-radius: 12px; padding: 9px 10px; background: #fff; color: var(--ink); }
+.prescription-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.prescription-form .confirm-actions button { padding-inline: 8px; font-size: 12px; }
+.prescription-form button:disabled { cursor: wait; opacity: .65; }
+.form-error { min-height: 0; margin-top: 9px; color: #b1271b; font-size: 11px; line-height: 1.4; }
 
 .camera-mode .screen-host { background: #0e0e0e; }
 .camera-screen { display: grid; grid-template-rows: 116px 1fr 108px; background: #0f0f0f; color: #fff; }

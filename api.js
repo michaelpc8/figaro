@@ -1,21 +1,56 @@
-// Use the same origin that serves the app. This works locally through Express
-// and through an HTTPS proxy such as Cloudflare Tunnel without mixed-content
-// or phone-localhost failures.
+// Same origin that serves the app - correct when Express serves both the
+// static files and the API (including through an HTTPS tunnel pointed at
+// Express). If something else is serving the static files on a different
+// port (e.g. a plain static file server), that origin has no /api routes and
+// answers with 404/405 - request() below detects that and falls back to the
+// backend's own port on the current hostname, so phones on the same network
+// still work without hardcoding "localhost".
 export const API_BASE = "/api";
+const API_PORT = 5000;
 
 // Reminders/medications backend routes don't exist yet, so those screens
 // still run on mock data. Camera scanning and Financials (NADAC-backed price
 // + history) are real and always hit the live backend below.
 export const DEV_USE_MOCKS = true;
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
+let resolvedApiBase = null;
+
+function fallbackApiBase() {
+  return `${window.location.protocol}//${window.location.hostname}:${API_PORT}/api`;
+}
+
+async function fetchFrom(base, path, options) {
+  return fetch(`${base}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
     ...options,
   });
+}
+
+async function request(path, options = {}) {
+  const primaryBase = resolvedApiBase || API_BASE;
+  let response;
+
+  try {
+    response = await fetchFrom(primaryBase, path, options);
+    // A real backend error is JSON (see the route handlers). Anything else
+    // on a non-ok response - an HTML error page, a bare 501, whatever a
+    // given static file server does with a POST - means this origin isn't
+    // actually our API.
+    const isJson = (response.headers.get("content-type") || "").includes("application/json");
+    if (!response.ok && !isJson) {
+      throw new Error("wrong-server");
+    }
+  } catch (error) {
+    if (primaryBase === API_BASE) {
+      response = await fetchFrom(fallbackApiBase(), path, options);
+      resolvedApiBase = fallbackApiBase();
+    } else {
+      throw error;
+    }
+  }
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null);

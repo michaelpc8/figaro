@@ -233,9 +233,10 @@ body {
 .page-header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .medications-screen .page-header { padding: 15px 5px 10px; }
 .medications-screen .page-header h1 { font-weight: 800; }
-.medications-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.add-prescription-button { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 8px 10px; background: linear-gradient(135deg, #0b8db4, #06ad9c); color: #fff; font-size: 10.5px; font-weight: 700; cursor: pointer; }
-.add-prescription-button svg { width: 15px; height: 15px; }
+.medications-screen .screen-scroll { padding-bottom: 82px; }
+.medications-title-row { display: flex; align-items: center; }
+.add-prescription-button { position: absolute; z-index: 10; left: 50%; bottom: 16px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 7px; border: 8px solid rgba(255,255,255,.94); border-radius: 999px; padding: 10px 15px; background: linear-gradient(135deg, #0b8db4, #06ad9c); color: #fff; box-shadow: 0 8px 24px rgba(42,63,83,.16); font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.add-prescription-button svg { width: 18px; height: 18px; }
 
 .med-list { display: grid; gap: 11px; }
 .med-card {

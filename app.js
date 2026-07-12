@@ -99,6 +99,7 @@ const state = {
     busy: false,
     message: "Tap the shutter to enable your camera.",
     pendingReminderPrompt: null,
+    manualEntry: null,
   },
   financials: {
     expandedId: null,
@@ -300,6 +301,48 @@ function remindersScreen() {
   `;
 }
 
+function manualEntryModal() {
+  const entry = state.camera.manualEntry;
+  if (!entry) return "";
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card manual-entry-card">
+        <h2>Add a Medication</h2>
+        <p class="manual-entry-hint">We'll check this against real pricing data before adding it — no photo needed.</p>
+        <form id="manualEntryForm">
+          <label class="manual-field">
+            <span>Medication name*</span>
+            <input id="manualName" type="text" placeholder="e.g. Lisinopril" required />
+          </label>
+          <label class="manual-field">
+            <span>NDC (optional, sharpens the match)</span>
+            <input id="manualNdc" type="text" placeholder="e.g. 59148-0008-13" />
+          </label>
+          <div class="manual-field-row">
+            <label class="manual-field">
+              <span>Strength</span>
+              <input id="manualStrength" type="text" placeholder="e.g. 10mg" />
+            </label>
+            <label class="manual-field">
+              <span>Quantity</span>
+              <input id="manualQuantity" type="text" placeholder="e.g. 30 tablets" />
+            </label>
+          </div>
+          <label class="manual-field">
+            <span>Amount you paid (optional)</span>
+            <input id="manualCost" type="text" placeholder="e.g. $14.99" />
+          </label>
+          ${entry.error ? `<p class="manual-entry-error">${entry.error}</p>` : ""}
+          <div class="modal-actions">
+            <button id="manualEntryCancel" class="modal-btn secondary" type="button" ${entry.busy ? "disabled" : ""}>Cancel</button>
+            <button id="manualEntrySubmit" class="modal-btn primary" type="submit" ${entry.busy ? "disabled" : ""}>${entry.busy ? "Checking…" : "Check & Add"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
 function cameraScreen() {
   const step = state.camera.step;
   const scanningFront = step === 1;
@@ -307,8 +350,8 @@ function cameraScreen() {
     <section class="screen camera-screen">
       <div class="camera-top">
         <div class="brand-lockup">${icon("pill")} <span>Papa Pill</span></div>
-        <h1>Scan Prescription</h1>
-        <p>Patient Information Leaflet</p>
+        <h1>Let's scan your prescription</h1>
+        <p>We'll read the label and find you the best price</p>
         <div class="scan-steps">
           <div class="scan-step active">
             <span>1</span>
@@ -331,6 +374,7 @@ function cameraScreen() {
           <span class="corner corner-bl"></span>
           <span class="corner corner-br"></span>
           <p id="cameraMessage" class="camera-message">${state.camera.message}</p>
+          <button id="manualEntryTrigger" class="manual-entry-trigger" type="button">Or enter it manually</button>
           <p class="align-copy">Align ${scanningFront ? "Front" : "Back"} Side within frame</p>
         </div>
       </div>
@@ -357,7 +401,7 @@ function cameraScreen() {
             </div>
           </div>
         </div>
-      ` : ""}
+      ` : manualEntryModal()}
     </section>
   `;
 }
@@ -586,6 +630,21 @@ function bindScreenEvents() {
 
   document.querySelector("#reminderPromptYes")?.addEventListener("click", () => respondToReminderPrompt(true));
   document.querySelector("#reminderPromptNo")?.addEventListener("click", () => respondToReminderPrompt(false));
+
+  document.querySelector("#manualEntryTrigger")?.addEventListener("click", () => {
+    state.camera.manualEntry = { busy: false, error: null };
+    render();
+  });
+
+  document.querySelector("#manualEntryCancel")?.addEventListener("click", () => {
+    state.camera.manualEntry = null;
+    render();
+  });
+
+  document.querySelector("#manualEntryForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitManualEntry();
+  });
 
   document.querySelectorAll(".fin-summary").forEach((button) => {
     button.addEventListener("click", () => {
@@ -868,6 +927,91 @@ function buildRemindersForMedication(medication) {
     period: slot.period,
     taken: false,
   }));
+}
+
+function buildMedicationFromManualEntry({ name, ndc, strength, quantityCount, match, priceInfo }) {
+  const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
+  const displayName = match?.rxNormName || match?.genericName || name;
+  const strengthValue = resolvedStrength({ match, strength });
+  const quantity = quantityCount || priceInfo?.unitCount || 30;
+
+  return {
+    id: crypto.randomUUID(),
+    scanned: true,
+    name: displayName,
+    subtitle: strengthValue || "Added manually",
+    accent: palette.accent,
+    iconBg: palette.iconBg,
+    current: quantity,
+    total: quantity,
+    treats: "Not available for manually added medications yet",
+    instructions: "Added manually — no label to scan for instructions",
+    dosage: strengthValue || "Not detected",
+    lastPickup: formatToday(),
+    ndc: ndc || "",
+    ndcMatch: match,
+    priceInfo,
+    rawText: "",
+    frequency: "",
+  };
+}
+
+async function submitManualEntry() {
+  const name = document.querySelector("#manualName")?.value.trim();
+  const ndcInput = document.querySelector("#manualNdc")?.value.trim();
+  const strength = document.querySelector("#manualStrength")?.value.trim();
+  const quantity = document.querySelector("#manualQuantity")?.value.trim();
+  const cost = document.querySelector("#manualCost")?.value.trim();
+
+  if (!name) {
+    state.camera.manualEntry = { busy: false, error: "Enter a medication name first." };
+    render();
+    return;
+  }
+
+  state.camera.manualEntry = { busy: true, error: null };
+  render();
+
+  try {
+    let match = null;
+    if (ndcInput) {
+      try {
+        match = await api.lookupNdc(ndcInput);
+      } catch (error) {
+        match = null;
+      }
+    }
+
+    const drugName = match?.rxNormName || match?.genericName || name;
+    const priceInfo = await api.comparePrice({
+      drugName,
+      genericName: match?.genericName || "",
+      ndc: ndcInput,
+      quantity,
+      paidCost: cost,
+    });
+
+    if (priceInfo.estimatedPrice == null) {
+      state.camera.manualEntry = {
+        busy: false,
+        error: `We couldn't find pricing data for "${name}". Double-check the spelling, or add the NDC from the label for a precise match.`,
+      };
+      render();
+      return;
+    }
+
+    const quantityCount = quantity ? Number(String(quantity).match(/\d+/)?.[0]) : null;
+    const medication = buildMedicationFromManualEntry({ name, ndc: ndcInput, strength, quantityCount, match, priceInfo });
+
+    state.medications.unshift(medication);
+    persistScannedMedications();
+    state.camera.manualEntry = null;
+    state.camera.pendingReminderPrompt = medication;
+    render();
+  } catch (error) {
+    state.camera.manualEntry = { busy: false, error: error.message || "Something went wrong. Try again." };
+    render();
+  }
 }
 
 async function handleCameraButton() {

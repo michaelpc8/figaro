@@ -29,6 +29,8 @@ const state = {
   reminderDeleteMode: false,
   reminderFormOpen: false,
   prescriptionFormOpen: false,
+  prescriptionFormBusy: false,
+  prescriptionFormError: null,
   medications: [
     ...loadScannedMedications(),
     {
@@ -142,15 +144,20 @@ function ndcMatchMarkup(medication) {
   return `${ndc}${name}${rxcui}`;
 }
 
-function priceSummaryMarkup(priceInfo, drugName) {
-  const link = priceInfo?.goodRxLink || goodRxCouponsUrl(drugName);
-  return `There may be a cheaper option available on GoodRx. ` +
-    `<a href="${link}" target="_blank" rel="noopener">View coupons and current listings</a>.`;
-}
-
 function goodRxCouponsUrl(drugName) {
   const slug = String(drugName || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return slug ? `https://www.goodrx.com/${slug}` : "https://www.goodrx.com/";
+}
+
+function priceSummaryMarkup(priceInfo, drugName) {
+  const link = priceInfo?.goodRxLink || goodRxCouponsUrl(drugName);
+  if (!priceInfo || priceInfo.estimatedPrice == null) {
+    return `No pricing data found for ${drugName}. <a href="${link}" target="_blank" rel="noopener">Check GoodRx</a>`;
+  }
+  if (priceInfo.cheaperAlternative) {
+    return `💰 A cheaper option may be available: ${priceInfo.cheaperAlternative.name}. <a href="${priceInfo.cheaperAlternative.goodRxLink}" target="_blank" rel="noopener">See current price on GoodRx</a>`;
+  }
+  return `No cheaper alternative found for ${drugName}. <a href="${link}" target="_blank" rel="noopener">See current price on GoodRx</a>`;
 }
 
 function combinedPrescriptionInstructions(medication) {
@@ -201,7 +208,7 @@ function medicationCard(medication) {
           ` : ""}
           ${medication.priceInfo ? `
             <section class="detail-panel">
-              <div class="detail-label">${icon("ticket")} <span>GOODRX COUPONS</span></div>
+              <div class="detail-label">${icon("dollar-sign")} <span>PRICE &amp; SAVINGS</span></div>
               <p>${priceSummaryMarkup(medication.priceInfo, medication.name)}</p>
             </section>
           ` : ""}
@@ -731,7 +738,7 @@ function renderConfirmDialog() {
     dialog.innerHTML = `
       <form id="prescriptionForm" class="confirm-panel prescription-form" role="dialog" aria-labelledby="prescriptionFormTitle">
         <h2 id="prescriptionFormTitle">Add prescription</h2>
-        <p>Enter the label details to preview this prescription and access its GoodRx coupon listings.</p>
+        <p>We'll check this against real pricing data before adding it.</p>
         <label>Medication name <input id="prescriptionName" type="text" placeholder="Example: Lisinopril" required></label>
         <div class="prescription-form-grid">
           <label>Strength <input id="prescriptionStrength" type="text" placeholder="10 mg"></label>
@@ -739,10 +746,11 @@ function renderConfirmDialog() {
         </div>
         <label>Directions <input id="prescriptionDirections" type="text" placeholder="Take one tablet daily"></label>
         <label>What it treats <input id="prescriptionTreats" type="text" placeholder="High blood pressure"></label>
-        <label>NDC (optional) <input id="prescriptionNdc" type="text" inputmode="numeric" placeholder="00000-0000-00"></label>
+        <label>NDC (optional, sharpens the match) <input id="prescriptionNdc" type="text" inputmode="numeric" placeholder="00000-0000-00"></label>
+        ${state.prescriptionFormError ? `<p class="form-error">${state.prescriptionFormError}</p>` : ""}
         <div class="confirm-actions">
-          <button id="savePrescription" class="confirm-yes" type="submit">Add prescription</button>
-          <button id="cancelPrescription" class="confirm-no" type="button">Cancel</button>
+          <button id="savePrescription" class="confirm-yes" type="submit" ${state.prescriptionFormBusy ? "disabled" : ""}>${state.prescriptionFormBusy ? "Checking…" : "Add prescription"}</button>
+          <button id="cancelPrescription" class="confirm-no" type="button" ${state.prescriptionFormBusy ? "disabled" : ""}>Cancel</button>
         </div>
       </form>
     `;
@@ -864,47 +872,94 @@ function bindPrescriptionFormEvents() {
 
   document.querySelector("#cancelPrescription")?.addEventListener("click", () => {
     state.prescriptionFormOpen = false;
+    state.prescriptionFormError = null;
     render();
   });
 
-  document.querySelector("#prescriptionForm")?.addEventListener("submit", (event) => {
+  document.querySelector("#prescriptionForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (state.prescriptionFormBusy) return;
+
     const name = document.querySelector("#prescriptionName").value.trim();
     const strength = document.querySelector("#prescriptionStrength").value.trim();
     const quantity = Number(document.querySelector("#prescriptionQuantity").value) || 30;
     const directions = document.querySelector("#prescriptionDirections").value.trim();
     const treats = document.querySelector("#prescriptionTreats").value.trim();
     const ndc = document.querySelector("#prescriptionNdc").value.trim();
-    const priceInfo = { goodRxLink: goodRxCouponsUrl(name) };
 
-    const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
-    const medication = {
-      id: crypto.randomUUID(),
-      scanned: true,
-      manual: true,
-      name,
-      subtitle: [name, strength].filter(Boolean).join(" "),
-      accent: palette.accent,
-      iconBg: palette.iconBg,
-      current: quantity,
-      total: quantity,
-      treats: treats || "No information added",
-      instructions: directions || "No information added",
-      dosage: [strength, directions].filter(Boolean).join(" – ") || "No information added",
-      strength,
-      lastPickup: formatToday(),
-      ndc,
-      priceInfo,
-      rawText: "",
-      frequency: "",
-    };
+    if (!name) {
+      state.prescriptionFormError = "Enter a medication name.";
+      render();
+      return;
+    }
 
-    state.medications.unshift(medication);
-    persistScannedMedications();
-    state.expandedMedicationId = medication.id;
-    state.prescriptionFormOpen = false;
+    state.prescriptionFormBusy = true;
+    state.prescriptionFormError = null;
     render();
-    showToast(`${name} added. GoodRx coupons are available in its details.`);
+
+    try {
+      let match = null;
+      if (ndc) {
+        try {
+          match = await api.lookupNdc(ndc);
+        } catch (error) {
+          match = null;
+        }
+      }
+
+      const drugName = match?.rxNormName || match?.genericName || name;
+      const priceInfo = await api.comparePrice({
+        drugName,
+        genericName: match?.genericName || "",
+        ndc,
+        quantity: String(quantity),
+        paidCost: "",
+      });
+
+      if (priceInfo.estimatedPrice == null) {
+        state.prescriptionFormBusy = false;
+        state.prescriptionFormError = `We couldn't find pricing data for "${name}". Double-check the spelling, or add the NDC from the label for a precise match.`;
+        render();
+        return;
+      }
+
+      const palette = ACCENT_PALETTE[state.medications.length % ACCENT_PALETTE.length];
+      const displayName = match?.rxNormName || match?.genericName || name;
+      const strengthValue = resolvedStrength({ match, strength });
+      const medication = {
+        id: crypto.randomUUID(),
+        scanned: true,
+        manual: true,
+        name: displayName,
+        subtitle: [strengthValue].filter(Boolean).join(" ") || "Added manually",
+        accent: palette.accent,
+        iconBg: palette.iconBg,
+        current: quantity,
+        total: quantity,
+        treats: treats || "No information added",
+        instructions: directions || "No information added",
+        dosage: [strengthValue, directions].filter(Boolean).join(" – ") || "No information added",
+        strength: strengthValue,
+        lastPickup: formatToday(),
+        ndc,
+        ndcMatch: match,
+        priceInfo,
+        rawText: "",
+        frequency: "",
+      };
+
+      state.medications.unshift(medication);
+      persistScannedMedications();
+      state.expandedMedicationId = medication.id;
+      state.prescriptionFormOpen = false;
+      state.prescriptionFormBusy = false;
+      render();
+      showToast(`${displayName} added to My Meds.`);
+    } catch (error) {
+      state.prescriptionFormBusy = false;
+      state.prescriptionFormError = error.message || "Something went wrong. Try again.";
+      render();
+    }
   });
 }
 

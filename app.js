@@ -1,6 +1,7 @@
 import { api, DEV_USE_MOCKS } from "./api.js";
 
 const SCANNED_STORAGE_KEY = "figaro-scanned-medications";
+const PILL_PEOPLE_STORAGE_KEY = "figaro-pill-people";
 
 const ACCENT_PALETTE = [
   { accent: "#138fb7", iconBg: "#e6f5fa" },
@@ -8,6 +9,8 @@ const ACCENT_PALETTE = [
   { accent: "#9668eb", iconBg: "#f3edff" },
   { accent: "#f0a23a", iconBg: "#fff4e3" },
 ];
+
+const PILL_SPRITE_TYPES = ["capsule", "tablet"];
 
 function loadScannedMedications() {
   try {
@@ -20,6 +23,23 @@ function loadScannedMedications() {
 function persistScannedMedications() {
   const scanned = state.medications.filter((medication) => medication.scanned);
   localStorage.setItem(SCANNED_STORAGE_KEY, JSON.stringify(scanned));
+}
+
+function loadPillPeople() {
+  try {
+    return JSON.parse(localStorage.getItem(PILL_PEOPLE_STORAGE_KEY) || "[]");
+  } catch (error) {
+    return [];
+  }
+}
+
+function persistPillPeople() {
+  // Only the progression (level/xp) needs to survive a reload - position and
+  // roaming target are re-randomized fresh each visit to the yard.
+  const toSave = state.pharmYard.pillPeople.map(({ id, medicationId, name, spriteType, level, xp }) => ({
+    id, medicationId, name, spriteType, level, xp,
+  }));
+  localStorage.setItem(PILL_PEOPLE_STORAGE_KEY, JSON.stringify(toSave));
 }
 
 const state = {
@@ -107,6 +127,18 @@ const state = {
   financials: {
     expandedId: null,
     cache: {},
+  },
+  pharmYard: {
+    // Starts empty on purpose - saved data only has {id, medicationId, name,
+    // spriteType, level, xp}, not position/target/frame/mood. Using it
+    // directly here would create pill-people missing those fields, and
+    // ensurePillPeopleForAllMedications() would then skip "fixing" them
+    // because they already exist by medicationId. Real pill-people are only
+    // ever created via spawnPillPerson(), which always sets every field;
+    // that function also restores level/xp from loadPillPeople() itself.
+    pillPeople: [],
+    petTimestamps: [],
+    selectedId: null,
   },
 };
 
@@ -532,13 +564,216 @@ function financialsScreen() {
   `;
 }
 
-function pharmacyScreen() {
+// -- PharmYard: a pill pal per tracked medication, roaming the grass,
+// leveling up from real adherence (or a pet) and going grumpy when a dose
+// is overdue. --
+
+const XP_PER_DOSE_TAKEN = 20;
+const XP_PER_PET = 5;
+const MAX_PETS_PER_HOUR = 15;
+const PET_WINDOW_MS = 60 * 60 * 1000;
+
+function xpToNextLevel(level) {
+  return 40 + (level - 1) * 20;
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+// Roam range: pillYard spans the full area below the header (proven-stable
+// layout), so "grass only" is just a Y-range restricted to the lower band
+// rather than a separate, shorter flex container.
+const ROAM_X_RANGE = [8, 92];
+const ROAM_Y_RANGE = [52, 92];
+
+function randomWaypoint() {
+  return { x: randomBetween(...ROAM_X_RANGE), y: randomBetween(...ROAM_Y_RANGE) };
+}
+
+function spawnPillPerson(medication, saved) {
+  const start = randomWaypoint();
+  const target = randomWaypoint();
+  const person = {
+    id: crypto.randomUUID(),
+    medicationId: medication.id,
+    name: medication.name,
+    spriteType: PILL_SPRITE_TYPES[state.pharmYard.pillPeople.length % PILL_SPRITE_TYPES.length],
+    level: saved?.level || 1,
+    xp: saved?.xp || 0,
+    x: start.x,
+    y: start.y,
+    targetX: target.x,
+    targetY: target.y,
+    frame: 1,
+    mood: "normal",
+  };
+  state.pharmYard.pillPeople.push(person);
+  return person;
+}
+
+// Every medication the user is tracking gets exactly one pill pal - called
+// whenever the yard is opened so it stays correct no matter which of the
+// three add-medication flows was used.
+function ensurePillPeopleForAllMedications() {
+  const saved = loadPillPeople();
+  let changed = false;
+  state.medications.forEach((medication) => {
+    const exists = state.pharmYard.pillPeople.some((p) => p.medicationId === medication.id);
+    if (!exists) {
+      const savedMatch = saved.find((p) => p.medicationId === medication.id);
+      spawnPillPerson(medication, savedMatch);
+      changed = true;
+    }
+  });
+  if (changed) persistPillPeople();
+}
+
+function pillPersonForMedicationName(name) {
+  const med = state.medications.find((m) => m.name.toLowerCase() === String(name || "").toLowerCase());
+  if (!med) return null;
+  return state.pharmYard.pillPeople.find((p) => p.medicationId === med.id) || null;
+}
+
+function awardXp(pillPersonId, amount) {
+  const person = state.pharmYard.pillPeople.find((p) => p.id === pillPersonId);
+  if (!person) return;
+
+  person.xp += amount;
+  let leveledUp = false;
+  while (person.xp >= xpToNextLevel(person.level)) {
+    person.xp -= xpToNextLevel(person.level);
+    person.level += 1;
+    leveledUp = true;
+  }
+  persistPillPeople();
+  updatePillPersonElement(person);
+  if (state.pharmYard.selectedId === pillPersonId) showPillPersonPopover(person);
+  if (leveledUp) showToast(`${person.name}'s pill pal leveled up to Lv. ${person.level}! 🎉`);
+}
+
+function parseReminderTimeToday(timeStr) {
+  const match = String(timeStr || "").match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const isPm = /pm/i.test(match[3]);
+  if (isPm && hours !== 12) hours += 12;
+  if (!isPm && hours === 12) hours = 0;
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
+function isMedicationOverdue(medicationName) {
+  const now = new Date();
+  return state.reminders.some((reminder) => {
+    if (reminder.medication.toLowerCase() !== String(medicationName || "").toLowerCase()) return false;
+    const due = parseReminderTimeToday(reminder.time);
+    return due && now > due && !reminder.taken;
+  });
+}
+
+function tryPetPillPerson(pillPersonId) {
+  const now = Date.now();
+  state.pharmYard.petTimestamps = state.pharmYard.petTimestamps.filter((t) => now - t < PET_WINDOW_MS);
+  if (state.pharmYard.petTimestamps.length >= MAX_PETS_PER_HOUR) {
+    return false;
+  }
+  state.pharmYard.petTimestamps.push(now);
+  awardXp(pillPersonId, XP_PER_PET);
+  return true;
+}
+
+function pillPersonMarkup(person) {
+  const scale = (1 + (person.level - 1) * 0.12).toFixed(2);
+  const frameSuffix = person.frame === 2 && person.spriteType === "tablet" ? 2 : 1;
   return `
-    <section class="screen utility-screen pharmacy-screen">
-      <div class="screen-scroll">
-        <header class="page-header">
+    <div class="pill-person ${person.mood === "angry" ? "angry" : ""}" data-pill-person-id="${person.id}"
+         style="left:${person.x}%; top:${person.y}%; --pill-scale:${scale};">
+      <img class="pill-person-sprite" src="images/${person.spriteType}guy${frameSuffix}.png" alt="${person.name} pill pal" draggable="false" />
+      <span class="pill-person-level">Lv.${person.level}</span>
+    </div>
+  `;
+}
+
+function showPillPersonPopover(person) {
+  hidePillPersonPopover();
+  const yard = document.querySelector("#pillYard");
+  if (!yard) return;
+  const progress = Math.min(100, Math.round((person.xp / xpToNextLevel(person.level)) * 100));
+  const popover = document.createElement("div");
+  popover.id = "pillPopover";
+  popover.className = "pill-popover";
+  popover.style.left = `${person.x}%`;
+  popover.style.top = `${person.y}%`;
+  popover.innerHTML = `
+    <strong>${person.name}</strong>
+    <span class="pill-popover-level">Level ${person.level}</span>
+    <div class="pill-popover-bar"><span style="width:${progress}%"></span></div>
+    <span class="pill-popover-xp">${person.xp} / ${xpToNextLevel(person.level)} XP</span>
+  `;
+  yard.appendChild(popover);
+}
+
+function hidePillPersonPopover() {
+  document.querySelector("#pillPopover")?.remove();
+  if (pillPopoverAutoCloseHandle) {
+    clearTimeout(pillPopoverAutoCloseHandle);
+    pillPopoverAutoCloseHandle = null;
+  }
+}
+
+let pillPopoverAutoCloseHandle = null;
+
+function selectPillPerson(personId) {
+  const person = state.pharmYard.pillPeople.find((p) => p.id === personId);
+  if (!person) return;
+
+  const el = document.querySelector(`.pill-person[data-pill-person-id="${personId}"]`);
+  if (el) {
+    el.classList.remove("startled");
+    void el.offsetWidth;
+    el.classList.add("startled");
+    el.addEventListener("animationend", () => el.classList.remove("startled"), { once: true });
+  }
+
+  if (state.pharmYard.selectedId === personId) {
+    state.pharmYard.selectedId = null;
+    hidePillPersonPopover();
+  } else {
+    state.pharmYard.selectedId = personId;
+    showPillPersonPopover(person);
+    // Safety net: no matter what else happens (a stray click, a bug we
+    // haven't found yet), a pal can never stay paused for more than this.
+    if (pillPopoverAutoCloseHandle) clearTimeout(pillPopoverAutoCloseHandle);
+    pillPopoverAutoCloseHandle = setTimeout(() => {
+      state.pharmYard.selectedId = null;
+      hidePillPersonPopover();
+    }, 8000);
+  }
+}
+
+function pharmacyScreen() {
+  ensurePillPeopleForAllMedications();
+  const petsLeft = Math.max(0, MAX_PETS_PER_HOUR - state.pharmYard.petTimestamps.filter((t) => Date.now() - t < PET_WINDOW_MS).length);
+  return `
+    <section class="screen pharmacy-screen">
+      <div class="pharmyard-header">
+        <div>
           <h1>PharmYard</h1>
-        </header>
+          <p>${state.pharmYard.pillPeople.length} pill pal${state.pharmYard.pillPeople.length === 1 ? "" : "s"} roaming free</p>
+        </div>
+        <button id="petHand" class="pet-hand" type="button" aria-label="Drag onto a pill pal to pet it" title="${petsLeft} pets left this hour">
+          🖐️
+        </button>
+      </div>
+      <div class="mascot-slot" aria-hidden="true">
+        <img class="mascot-image" src="images/bunny.png" alt="" draggable="false" />
+      </div>
+      <div id="pillYard" class="pill-yard">
+        ${state.pharmYard.pillPeople.map(pillPersonMarkup).join("")}
+        ${state.pharmYard.pillPeople.length === 0 ? `<p class="pill-yard-empty">Scan or add a medication to hatch your first pill pal!</p>` : ""}
       </div>
     </section>
   `;
@@ -553,6 +788,153 @@ const renderers = {
 };
 
 const SCREEN_ORDER = ["medications", "reminders", "camera", "financials", "pharmacy"];
+
+// -- PharmYard animation: mutates each sprite's own DOM node directly on a
+// tick instead of going through render(), so roaming doesn't fight with an
+// in-progress salt-shaker drag or wipe out mid-drag state. --
+
+let pharmYardTickHandle = null;
+
+function updatePillPersonElement(person) {
+  const el = document.querySelector(`.pill-person[data-pill-person-id="${person.id}"]`);
+  if (!el) return;
+  el.style.left = `${person.x}%`;
+  el.style.top = `${person.y}%`;
+  el.style.setProperty("--pill-scale", (1 + (person.level - 1) * 0.12).toFixed(2));
+  el.classList.toggle("angry", person.mood === "angry");
+  const img = el.querySelector(".pill-person-sprite");
+  if (img) {
+    const frameSuffix = person.frame === 2 && person.spriteType === "tablet" ? 2 : 1;
+    img.src = `images/${person.spriteType}guy${frameSuffix}.png`;
+  }
+  const levelTag = el.querySelector(".pill-person-level");
+  if (levelTag) levelTag.textContent = `Lv.${person.level}`;
+}
+
+function tickPillYard() {
+  // Nothing ever pauses movement - a pal keeps roaming even while its
+  // popover is open; the popover just follows it each tick instead.
+  state.pharmYard.pillPeople.forEach((person) => {
+    if (Math.abs(person.x - person.targetX) < 2 && Math.abs(person.y - person.targetY) < 2) {
+      const next = randomWaypoint();
+      person.targetX = next.x;
+      person.targetY = next.y;
+    }
+    person.x += Math.sign(person.targetX - person.x) * Math.min(1.4, Math.abs(person.targetX - person.x));
+    person.y += Math.sign(person.targetY - person.y) * Math.min(1.4, Math.abs(person.targetY - person.y));
+    person.frame = person.frame === 1 ? 2 : 1;
+    person.mood = isMedicationOverdue(person.name) ? "angry" : "normal";
+    updatePillPersonElement(person);
+
+    if (person.id === state.pharmYard.selectedId) {
+      const popover = document.querySelector("#pillPopover");
+      if (popover) {
+        popover.style.left = `${person.x}%`;
+        popover.style.top = `${person.y}%`;
+      }
+    }
+  });
+}
+
+function setupPillYard() {
+  if (pharmYardTickHandle) clearInterval(pharmYardTickHandle);
+  pharmYardTickHandle = setInterval(tickPillYard, 650);
+  setupPetHandDrag();
+  setupPillPersonClicks();
+}
+
+function teardownPillYard() {
+  if (pharmYardTickHandle) {
+    clearInterval(pharmYardTickHandle);
+    pharmYardTickHandle = null;
+  }
+}
+
+function setupPillPersonClicks() {
+  const yard = document.querySelector("#pillYard");
+  if (!yard) return;
+  yard.addEventListener("click", (event) => {
+    if (event.target.closest("#pillPopover")) return;
+    const personEl = event.target.closest(".pill-person");
+    if (!personEl) {
+      state.pharmYard.selectedId = null;
+      hidePillPersonPopover();
+      return;
+    }
+    selectPillPerson(personEl.dataset.pillPersonId);
+  });
+}
+
+function setupPetHandDrag() {
+  const hand = document.querySelector("#petHand");
+  const yard = document.querySelector("#pillYard");
+  if (!hand || !yard) return;
+
+  let dragging = false;
+  let lastPetAt = 0;
+
+  const findPillPersonAt = (clientX, clientY) => {
+    const els = document.elementsFromPoint(clientX, clientY);
+    const hit = els.find((el) => el.classList?.contains("pill-person"));
+    if (!hit) return null;
+    const id = hit.dataset.pillPersonId;
+    return state.pharmYard.pillPeople.find((p) => p.id === id) || null;
+  };
+
+  hand.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    hand.setPointerCapture(event.pointerId);
+    hand.classList.add("dragging");
+  });
+
+  hand.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    hand.style.left = `${event.clientX}px`;
+    hand.style.top = `${event.clientY}px`;
+
+    const now = Date.now();
+    if (now - lastPetAt < 450) return;
+    const target = findPillPersonAt(event.clientX, event.clientY);
+    if (!target) return;
+
+    lastPetAt = now;
+    const petted = tryPetPillPerson(target.id);
+    const handButton = document.querySelector("#petHand");
+    if (petted) {
+      spawnPetSparkle(target);
+      if (handButton) {
+        const left = Math.max(0, MAX_PETS_PER_HOUR - state.pharmYard.petTimestamps.length);
+        handButton.title = `${left} pets left this hour`;
+      }
+    } else {
+      showToast("These pals need a rest — more pets available next hour.");
+    }
+  });
+
+  const endDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    hand.classList.remove("dragging");
+    hand.style.left = "";
+    hand.style.top = "";
+    try { hand.releasePointerCapture(event.pointerId); } catch (error) { /* already released */ }
+  };
+
+  hand.addEventListener("pointerup", endDrag);
+  hand.addEventListener("pointercancel", endDrag);
+}
+
+function spawnPetSparkle(person) {
+  const yard = document.querySelector("#pillYard");
+  if (!yard) return;
+  const sparkle = document.createElement("span");
+  sparkle.className = "feed-sparkle";
+  sparkle.textContent = "+XP";
+  sparkle.style.left = `${person.x}%`;
+  sparkle.style.top = `${person.y}%`;
+  yard.appendChild(sparkle);
+  sparkle.addEventListener("animationend", () => sparkle.remove(), { once: true });
+}
 
 function setActiveNavigation() {
   document.querySelectorAll(".nav-item").forEach((item) => {
@@ -572,6 +954,12 @@ function render() {
     const video = document.querySelector("#cameraVideo");
     video.srcObject = state.camera.stream;
     document.querySelector("#cameraMessage").textContent = state.camera.busy ? state.camera.message : "";
+  }
+
+  if (state.screen === "pharmacy") {
+    setupPillYard();
+  } else {
+    teardownPillYard();
   }
 }
 
@@ -602,6 +990,11 @@ function bindScreenEvents() {
 
       reminder.taken = !reminder.taken;
       render();
+
+      if (reminder.taken) {
+        const person = pillPersonForMedicationName(reminder.medication);
+        if (person) awardXp(person.id, XP_PER_DOSE_TAKEN);
+      }
 
       if (!DEV_USE_MOCKS) {
         try {
@@ -1244,6 +1637,13 @@ function stopCamera() {
 function navigateToScreen(nextScreen) {
   if (nextScreen === state.screen) return;
   if (nextScreen !== "camera" && state.screen === "camera") stopCamera();
+  if (nextScreen !== "pharmacy" && state.screen === "pharmacy") {
+    state.pharmYard.selectedId = null;
+    if (pillPopoverAutoCloseHandle) {
+      clearTimeout(pillPopoverAutoCloseHandle);
+      pillPopoverAutoCloseHandle = null;
+    }
+  }
 
   const reverse = SCREEN_ORDER.indexOf(nextScreen) < SCREEN_ORDER.indexOf(state.screen);
   const outgoingEl = screenHost.firstElementChild;
